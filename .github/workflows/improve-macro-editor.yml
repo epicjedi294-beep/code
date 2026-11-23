@@ -1,0 +1,623 @@
+name: Improve macro editor blocks and execution
+
+on:
+  push:
+    paths:
+      - ".github/workflows/improve-macro-editor.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  improve-macro-editor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Improve Macro editor, repeat insertion, and trigger dispatch
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java")
+          source = path.read_text(encoding="utf-8")
+
+          def replace_once(old, new, description):
+              global source
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"{description}: expected one match, found {count}")
+              source = source.replace(old, new, 1)
+
+          # Version changes only the displayed/package version. The saved-data schema
+          # is unchanged, so FILE_VERSION stays at 15 and all existing data remains readable.
+          build_path = Path("KeySequenceStudio_Simple/build.gradle")
+          build = build_path.read_text(encoding="utf-8")
+          if "version = '1.4.5'" not in build:
+              raise SystemExit("Expected the v1.4.5 project as the current base.")
+          build_path.write_text(build.replace("version = '1.4.5'", "version = '1.4.6'", 1), encoding="utf-8")
+
+          # The old fixed 10px preferred height prevented the toolbox from reporting
+          # its real content height to JScrollPane, so its vertical scrollbar could not scroll.
+          replace_once(
+              "        toolbox.setPreferredSize(new Dimension(142, 10));",
+              "        toolbox.setMinimumSize(new Dimension(150, 0));",
+              "Remove fixed toolbox preferred height"
+          )
+          replace_once(
+              """        toolboxScroll.setPreferredSize(new Dimension(175, 360));
+                  toolboxScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+                  toolboxScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+                  toolboxScroll.setBorder(BorderFactory.createLineBorder(new Color(218, 224, 232)));
+                  styleScrollPane(toolboxScroll);""",
+              """        toolboxScroll.setPreferredSize(new Dimension(185, 360));
+                  toolboxScroll.setMinimumSize(new Dimension(165, 0));
+                  toolboxScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+                  toolboxScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
+                  toolboxScroll.getVerticalScrollBar().setUnitIncrement(20);
+                  toolboxScroll.getVerticalScrollBar().setBlockIncrement(120);
+                  toolboxScroll.getViewport().setBackground(new Color(242, 245, 249));
+                  toolboxScroll.setBorder(BorderFactory.createLineBorder(new Color(218, 224, 232)));
+                  styleScrollPane(toolboxScroll);
+                  toolboxScroll.getViewport().setBackground(new Color(242, 245, 249));""",
+              "Make toolbox scrollbar visible and usable"
+          )
+
+          replace_once(
+              "        macroBlockList.setFixedCellHeight(68);",
+              "        macroBlockList.setFixedCellHeight(54);",
+              "Shrink macro workspace rows"
+          )
+
+          # Slightly compact toolbox buttons while preserving readable font size.
+          start = source.index("    private JButton createToolboxBlockButton(")
+          end = source.index("\n    private void installMacroBlockDragAndDrop()", start)
+          toolbox_method = source[start:end]
+          toolbox_method = toolbox_method.replace('new Font("Segoe UI", Font.BOLD, 11)', 'new Font("Segoe UI", Font.BOLD, 10)', 1)
+          toolbox_method = toolbox_method.replace("new Dimension(Integer.MAX_VALUE, 34)", "new Dimension(Integer.MAX_VALUE, 30)", 1)
+          toolbox_method = toolbox_method.replace("new EmptyBorder(7, 8, 7, 8)", "new EmptyBorder(6, 8, 6, 8)", 1)
+          source = source[:start] + toolbox_method + source[end:]
+
+          # End Repeat is now automatically paired with each Repeat block. Keeping it
+          # as a toolbox action invited stray unmatched closing markers.
+          replace_once(
+              '        addToolboxBlock(toolbox, "End repeat", MacroBlockType.END_REPEAT, new Color(226, 147, 31));\n',
+              "",
+              "Remove manual End repeat toolbox action"
+          )
+
+          # Trigger keys in lists are intentionally gray chips rather than white text,
+          # including when their row is selected. Apply to Sequence, Hold, and Macro lists.
+          old_trigger = "            trigger.setForeground(selected ? new Color(218, 224, 232) : new Color(125, 135, 149));"
+          new_trigger = """            trigger.setForeground(new Color(91, 101, 116));
+                      trigger.setOpaque(true);
+                      trigger.setBackground(new Color(232, 235, 240));
+                      trigger.setBorder(new EmptyBorder(2, 5, 2, 5));"""
+          count = source.count(old_trigger)
+          if count != 3:
+              raise SystemExit(f"Expected three bind-trigger renderers, found {count}")
+          source = source.replace(old_trigger, new_trigger)
+
+          old_details = "            details.setForeground(selected ? new Color(226, 231, 238) : new Color(101, 111, 125));"
+          new_details = "            details.setForeground(new Color(82, 93, 108));"
+          if source.count(old_details) != 3:
+              raise SystemExit("Could not locate all selected-row detail colors.")
+          source = source.replace(old_details, new_details)
+
+          # Insert actions next to the selected block. Selecting a Repeat places the
+          # next action inside its body; selecting End Repeat places it after the loop.
+          method_start = source.index("    private void addMacroBlock(MacroBlockType type) {")
+          method_end = source.index("\n    private void beginMacroBlockInputCapture", method_start)
+          new_insert_methods = """    private void addMacroBlock(MacroBlockType type) {
+                  if (type == MacroBlockType.RANDOM_NUMBER) {
+                      editRandomReporterDefaults();
+                      return;
+                  }
+                  if (type == MacroBlockType.END_REPEAT) {
+                      statusLabel.setText("End repeat is added automatically when you create a Repeat block.");
+                      return;
+                  }
+                  insertMacroBlock(type, -1);
+              }
+
+              private void insertMacroBlock(MacroBlockType type, int requestedIndex) {
+                  if (type == MacroBlockType.RANDOM_NUMBER) {
+                      statusLabel.setText("Random is a value block. Drag it onto a numbered [ ] input slot.");
+                      return;
+                  }
+                  Macro macro = macroList.getSelectedValue();
+                  if (macro == null) {
+                      statusLabel.setText("Create or select a macro first.");
+                      return;
+                  }
+                  if (type == null) return;
+
+                  boolean addClosingRepeat = type == MacroBlockType.REPEAT;
+                  int requiredSlots = addClosingRepeat ? 2 : 1;
+                  if (macro.blocks.size() + requiredSlots > MAX_STEPS_PER_BIND) {
+                      statusLabel.setText("This macro has reached the block limit.");
+                      return;
+                  }
+
+                  MacroBlock block = switch (type) {
+                      case KEY -> MacroBlock.key(KeyEvent.VK_A, DEFAULT_HOLD_MS);
+                      case MOUSE -> MacroBlock.mouse(NativeMouseEvent.BUTTON1, DEFAULT_HOLD_MS);
+                      case WAIT -> MacroBlock.waitFor(250);
+                      case NOTIFY -> MacroBlock.notify("Macro notification");
+                      case TYPE_TEXT -> MacroBlock.typeText("Hello world", 12);
+                      case SCROLL -> MacroBlock.scroll(-1);
+                      case RANDOM_WAIT -> MacroBlock.randomWait(50, 150); // Legacy save compatibility; no longer in the toolbox.
+                      case RANDOM_NUMBER -> null;
+                      case REPEAT -> MacroBlock.repeat(3);
+                      case END_REPEAT -> null; // Matching close markers are inserted with Repeat.
+                      case STOP -> MacroBlock.marker(MacroBlockType.STOP);
+                      case BEEP -> MacroBlock.marker(MacroBlockType.BEEP);
+                      case COPY_TEXT -> MacroBlock.copyText("Text to copy");
+                      case COMMENT -> MacroBlock.comment("Add a note...");
+                      case MOVE_MOUSE -> MacroBlock.moveMouse(100, 100);
+                      case MOVE_MOUSE_REL -> MacroBlock.moveMouseRel(50, 0);
+                      case FIND_PIXEL -> MacroBlock.findPixel(0, 0, 200, 200, 0xFF0000, 15);
+                      case END_IF -> MacroBlock.marker(MacroBlockType.END_IF);
+                  };
+                  if (block == null) return;
+
+                  int selectedIndex = macroBlockList.getSelectedIndex();
+                  int index = requestedIndex < 0
+                          ? (selectedIndex >= 0 ? selectedIndex + 1 : macro.blocks.size())
+                          : Math.max(0, Math.min(requestedIndex, macro.blocks.size()));
+
+                  synchronized (macro.blocks) {
+                      macro.blocks.add(index, block);
+                      if (addClosingRepeat) {
+                          macro.blocks.add(index + 1, MacroBlock.marker(MacroBlockType.END_REPEAT));
+                      }
+                  }
+
+                  refreshMacroBlocks();
+                  // Keep Repeat selected so the next toolbox action is inserted into its body.
+                  // Subsequent actions remain inside the body until the user selects End Repeat.
+                  macroBlockList.setSelectedIndex(index);
+                  macroBlockList.ensureIndexIsVisible(index);
+                  persistBinds();
+
+                  if (type == MacroBlockType.KEY || type == MacroBlockType.MOUSE) {
+                      beginMacroBlockInputCapture(block);
+                  } else if (addClosingRepeat) {
+                      statusLabel.setText("Added Repeat with its matching End repeat. Select Repeat and add blocks to place them inside.");
+                  } else {
+                      statusLabel.setText("Added " + block.description() + " block.");
+                  }
+              }
+          """
+          source = source[:method_start] + new_insert_methods + source[method_end:]
+
+          # Deleting a Repeat or its End Repeat removes the matching partner too,
+          # preventing an accidentally broken program structure.
+          remove_start = source.index("    private void removeSelectedMacroBlock() {")
+          remove_end = source.index("\n    private void renameMacroTriggerLabel", remove_start)
+          new_remove_method = """    private void removeSelectedMacroBlock() {
+                  Macro macro = macroList.getSelectedValue();
+                  int index = macroBlockList.getSelectedIndex();
+                  if (macro == null || index < 0) return;
+
+                  MacroBlock selected = macro.blocks.get(index);
+                  int partner = -1;
+                  if (selected.type == MacroBlockType.REPEAT) {
+                      partner = findMatchingEndRepeat(macro.blocks, index);
+                  } else if (selected.type == MacroBlockType.END_REPEAT) {
+                      partner = findMatchingStartRepeat(macro.blocks, index);
+                  }
+
+                  synchronized (macro.blocks) {
+                      if (partner >= 0 && partner < macro.blocks.size()) {
+                          int first = Math.min(index, partner);
+                          int second = Math.max(index, partner);
+                          macro.blocks.remove(second);
+                          macro.blocks.remove(first);
+                      } else {
+                          macro.blocks.remove(index);
+                      }
+                  }
+                  refreshMacroBlocks();
+                  if (!macroBlockListModel.isEmpty()) {
+                      macroBlockList.setSelectedIndex(Math.min(index, macroBlockListModel.size() - 1));
+                  }
+                  persistBinds();
+                  statusLabel.setText(partner >= 0
+                          ? "Removed the Repeat block and its matching End repeat."
+                          : "Removed macro block.");
+              }
+
+              private static int findMatchingEndRepeat(List<MacroBlock> blocks, int startIndex) {
+                  int depth = 0;
+                  for (int i = startIndex; i < blocks.size(); i++) {
+                      MacroBlockType type = blocks.get(i).type;
+                      if (type == MacroBlockType.REPEAT) depth++;
+                      else if (type == MacroBlockType.END_REPEAT && --depth == 0) return i;
+                  }
+                  return -1;
+              }
+
+              private static int findMatchingStartRepeat(List<MacroBlock> blocks, int endIndex) {
+                  int depth = 0;
+                  for (int i = endIndex; i >= 0; i--) {
+                      MacroBlockType type = blocks.get(i).type;
+                      if (type == MacroBlockType.END_REPEAT) depth++;
+                      else if (type == MacroBlockType.REPEAT && --depth == 0) return i;
+                  }
+                  return -1;
+              }
+          """
+          source = source[:remove_start] + new_remove_method + source[remove_end:]
+
+          # A selected Repeat header should accept a nested action immediately after it;
+          # drag-and-drop insertion already uses the exact drop index.
+          # Keep the macro trigger dispatch explicit and report why a trigger did not run.
+          old_dispatch = """        if (macroRunning.get()) return;
+                  Macro matchingMacro = macroTriggerMap.get(triggerCode);
+                  if (matchingMacro != null && matchingMacro.enabled && isMacrosRuntimeEnabled()) {
+                      List<MacroBlock> blocks = new ArrayList<>();
+                      synchronized (matchingMacro.blocks) {
+                          for (MacroBlock block : matchingMacro.blocks) blocks.add(block.copy());
+                      }
+                      if (blocks.isEmpty()) return;
+                      int macroRepeats = matchingMacro.repeatCount;
+                      String macroName = matchingMacro.name;
+                      if (!submitAutomation(AutomationCategory.MACRO, () -> runMacro(blocks, macroRepeats, macroName))) return;
+                      showNotification("Macro started", macroName);
+                      return;
+                  }
+
+                  Bind matching = findEnabledBind(triggerCode);"""
+          new_dispatch = """        Macro matchingMacro = macroTriggerMap.get(triggerCode);
+                  if (matchingMacro != null) {
+                      if (!matchingMacro.enabled || !isMacrosRuntimeEnabled()) return;
+                      if (macroRunning.get()) {
+                          SwingUtilities.invokeLater(() -> statusLabel.setText(
+                                  "Macro '" + matchingMacro.name + "' was triggered, but another automation is still running."));
+                          return;
+                      }
+                      List<MacroBlock> blocks = new ArrayList<>();
+                      synchronized (matchingMacro.blocks) {
+                          for (MacroBlock block : matchingMacro.blocks) blocks.add(block.copy());
+                      }
+                      String macroName = matchingMacro.name;
+                      int macroRepeats = matchingMacro.repeatCount;
+                      if (blocks.isEmpty()) {
+                          SwingUtilities.invokeLater(() -> statusLabel.setText(
+                                  "Macro '" + macroName + "' has no blocks yet. Add blocks in the Macros tab."));
+                          return;
+                      }
+                      logMacro("Trigger received: " + macroName + " (" + triggerName(triggerCode) + ")");
+                      if (!submitAutomation(AutomationCategory.MACRO,
+                              () -> runMacro(blocks, macroRepeats, macroName))) {
+                          SwingUtilities.invokeLater(() -> statusLabel.setText(
+                                  "Could not start macro '" + macroName + "'. Another automation may be running."));
+                          return;
+                      }
+                      showNotification("Macro started", macroName);
+                      return;
+                  }
+
+                  if (macroRunning.get()) return;
+                  Bind matching = findEnabledBind(triggerCode);"""
+          replace_once(old_dispatch, new_dispatch, "Make macro trigger dispatch explicit")
+
+          # Improve editor hints so users discover the Repeat-container workflow.
+          replace_once(
+              '        JLabel workspaceHint = new JLabel("Drag blocks to reorder or drag from the toolbox to add · double-click to edit");',
+              '        JLabel workspaceHint = new JLabel("Select a block, then add from the toolbox after it · Repeat opens a body · double-click to edit · drag to reorder");',
+              "Update workspace instruction"
+          )
+
+          # Replace renderer with compact connected blocks and gray input chips.
+          renderer_start = source.index("    private static final class MacroBlockRenderer extends JPanel implements ListCellRenderer<MacroBlock> {")
+          renderer_end = source.index("\n    private enum PotatoPreset", renderer_start)
+          renderer = r'''    private static void drawMacroDetail(Graphics2D g, String text, int x, int baseline,
+                                                  int maxWidth, Color textColor) {
+                  if (text == null || text.isEmpty() || maxWidth <= 0) return;
+                  FontMetrics metrics = g.getFontMetrics();
+                  int cursor = x;
+                  int pos = 0;
+                  while (pos < text.length() && cursor - x < maxWidth) {
+                      int open = text.indexOf('[', pos);
+                      if (open < 0) open = text.length();
+                      if (open > pos) {
+                          String plain = text.substring(pos, open);
+                          int remaining = maxWidth - (cursor - x);
+                          String draw = plain;
+                          while (!draw.isEmpty() && metrics.stringWidth(draw) > remaining) {
+                              draw = draw.substring(0, draw.length() - 1);
+                          }
+                          if (!draw.isEmpty()) {
+                              g.setColor(textColor);
+                              g.drawString(draw, cursor, baseline);
+                              cursor += metrics.stringWidth(draw);
+                          }
+                          if (draw.length() < plain.length()) break;
+                          pos = open;
+                      }
+                      if (pos >= text.length()) break;
+                      int close = text.indexOf(']', pos + 1);
+                      if (close < 0) {
+                          String tail = text.substring(pos);
+                          int remaining = maxWidth - (cursor - x);
+                          String draw = tail;
+                          while (!draw.isEmpty() && metrics.stringWidth(draw) > remaining) {
+                              draw = draw.substring(0, draw.length() - 1);
+                          }
+                          if (!draw.isEmpty()) {
+                              g.setColor(textColor);
+                              g.drawString(draw, cursor, baseline);
+                          }
+                          break;
+                      }
+                      String slot = text.substring(pos, close + 1);
+                      int slotWidth = metrics.stringWidth(slot) + 8;
+                      if (cursor - x + slotWidth > maxWidth) break;
+                      int slotHeight = Math.max(14, metrics.getHeight() - 1);
+                      int slotY = baseline - metrics.getAscent() + 1;
+                      g.setColor(new Color(226, 231, 237));
+                      g.fillRoundRect(cursor, slotY, slotWidth, slotHeight, 6, 6);
+                      g.setColor(new Color(78, 89, 105));
+                      g.drawString(slot, cursor + 4, baseline);
+                      cursor += slotWidth + 3;
+                      pos = close + 1;
+                  }
+              }
+
+              private static final class MacroBlockRenderer extends JPanel implements ListCellRenderer<MacroBlock> {
+                  private static final long serialVersionUID = 1L;
+                  private Color blockColor = new Color(76, 151, 255);
+                  private String orderText = "01";
+                  private String titleText = "PRESS KEY";
+                  private String detailText = "[ A ]  hold [ 20 ] ms";
+                  private boolean selected;
+                  private int indent;
+
+                  private MacroBlockRenderer() {
+                      setOpaque(false);
+                      setPreferredSize(new Dimension(360, 54));
+                  }
+
+                  @Override
+                  public Component getListCellRendererComponent(JList<? extends MacroBlock> list, MacroBlock block,
+                          int index, boolean isSelected, boolean focused) {
+                      blockColor = switch (block.type) {
+                          case KEY -> new Color(76, 151, 255);
+                          case MOUSE, SCROLL, MOVE_MOUSE, MOVE_MOUSE_REL -> new Color(76, 151, 255);
+                          case WAIT, RANDOM_WAIT, REPEAT, END_REPEAT -> new Color(255, 171, 25);
+                          case NOTIFY -> new Color(153, 102, 255);
+                          case BEEP -> new Color(207, 99, 207);
+                          case TYPE_TEXT -> new Color(49, 132, 208);
+                          case STOP -> new Color(211, 76, 76);
+                          case COPY_TEXT, FIND_PIXEL, END_IF -> new Color(92, 177, 214);
+                          case COMMENT -> new Color(119, 130, 145);
+                          case RANDOM_NUMBER -> new Color(89, 192, 89);
+                      };
+                      selected = isSelected;
+                      int depth = 0;
+                      for (int i = 0; i < index; i++) {
+                          MacroBlockType prior = list.getModel().getElementAt(i).type;
+                          if (prior == MacroBlockType.REPEAT || prior == MacroBlockType.FIND_PIXEL) depth++;
+                          else if (prior == MacroBlockType.END_REPEAT || prior == MacroBlockType.END_IF) depth = Math.max(0, depth - 1);
+                      }
+                      if (block.type == MacroBlockType.END_REPEAT || block.type == MacroBlockType.END_IF) {
+                          depth = Math.max(0, depth - 1);
+                      }
+                      indent = Math.min(60, depth * 12);
+                      orderText = String.format(Locale.ROOT, "%02d", index + 1);
+                      switch (block.type) {
+                          case KEY -> {
+                              titleText = "PRESS KEY";
+                              detailText = "[ " + keyName(block.code) + " ]  hold [ " + numericSlotText(block, block.milliseconds) + " ] ms";
+                          }
+                          case MOUSE -> {
+                              titleText = "CLICK MOUSE";
+                              detailText = "[ " + mouseStepName(block.code) + " ]  hold [ " + numericSlotText(block, block.milliseconds) + " ] ms";
+                          }
+                          case WAIT -> {
+                              titleText = "WAIT";
+                              detailText = "Wait [ " + numericSlotText(block, block.milliseconds) + " ] ms";
+                          }
+                          case NOTIFY -> {
+                              titleText = "SHOW NOTIFICATION";
+                              detailText = previewBlockText(block.text);
+                          }
+                          case TYPE_TEXT -> {
+                              titleText = "TYPE TEXT";
+                              detailText = previewBlockText(block.text) + "  ·  interval [ " + numericSlotText(block, block.milliseconds) + " ] ms";
+                          }
+                          case SCROLL -> {
+                              titleText = "SCROLL WHEEL";
+                              detailText = (block.code > 0 ? "UP " : "DOWN ")
+                                      + "[ " + numericSlotText(block, Math.abs(block.code)) + " ] notch(es)";
+                          }
+                          case RANDOM_WAIT -> {
+                              titleText = "RANDOM WAIT";
+                              detailText = block.milliseconds + "–" + block.code + " ms";
+                          }
+                          case REPEAT -> {
+                              titleText = "REPEAT";
+                              detailText = "repeat [ " + numericSlotText(block, block.code) + " ] times  ·  body below";
+                          }
+                          case END_REPEAT -> {
+                              titleText = "END REPEAT";
+                              detailText = "closes the Repeat block above";
+                          }
+                          case STOP -> {
+                              titleText = "STOP MACRO";
+                              detailText = "stop running this macro";
+                          }
+                          case BEEP -> {
+                              titleText = "PLAY BEEP";
+                              detailText = "play the system notification sound";
+                          }
+                          case COPY_TEXT -> {
+                              titleText = "COPY TEXT";
+                              detailText = previewBlockText(block.text);
+                          }
+                          case COMMENT -> {
+                              titleText = "COMMENT";
+                              detailText = previewBlockText(block.text);
+                          }
+                          case RANDOM_NUMBER -> {
+                              titleText = "RANDOM NUMBER VALUE";
+                              detailText = "drag this reporter into a numbered [ ] input slot";
+                          }
+                          case MOVE_MOUSE -> {
+                              titleText = "MOVE MOUSE TO";
+                              detailText = "x: [ " + numericSlotText(block, block.code) + " ]  y: [ " + numericSlotText(block, block.milliseconds) + " ]";
+                          }
+                          case MOVE_MOUSE_REL -> {
+                              titleText = "MOVE MOUSE BY";
+                              detailText = "dx: [ " + numericSlotText(block, block.code) + " ]  dy: [ " + numericSlotText(block, block.milliseconds) + " ]";
+                          }
+                          case FIND_PIXEL -> {
+                              titleText = "IF PIXEL FOUND";
+                              detailText = String.format(Locale.ROOT, "#%06X  region %d,%d  %dx%d  tol %d",
+                                      block.colorRgb & 0xFFFFFF, block.searchX, block.searchY, block.searchW, block.searchH, block.colorTolerance);
+                          }
+                          case END_IF -> {
+                              titleText = "END IF";
+                              detailText = "closes the If pixel found block";
+                          }
+                      }
+                      return this;
+                  }
+
+                  @Override
+                  protected void paintComponent(Graphics graphics) {
+                      super.paintComponent(graphics);
+                      Graphics2D g = (Graphics2D) graphics.create();
+                      try {
+                          g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                          float left = indent + 2f;
+                          float right = getWidth() - 5f;
+                          float top = 1f;
+                          float bottom = getHeight() - 8f;
+                          float connectorX = left + 28f;
+                          float half = 8f;
+                          float socketDepth = 7f;
+                          Path2D.Float shape = new Path2D.Float();
+                          shape.moveTo(left + 7f, top);
+                          shape.lineTo(connectorX - half, top);
+                          // Top socket: a compact Scratch-style indentation.
+                          shape.lineTo(connectorX - half + 2f, top + 2f);
+                          shape.quadTo(connectorX, top + socketDepth, connectorX + half - 2f, top + 2f);
+                          shape.lineTo(connectorX + half, top);
+                          shape.lineTo(right - 7f, top);
+                          shape.quadTo(right, top, right, top + 7f);
+                          shape.lineTo(right, bottom - 7f);
+                          shape.quadTo(right, bottom, right - 7f, bottom);
+                          shape.lineTo(connectorX + half, bottom);
+                          // Bottom tab reaches the cell edge so adjacent blocks read as one stack.
+                          shape.lineTo(connectorX + half - 2f, bottom + 2f);
+                          shape.quadTo(connectorX, bottom + socketDepth, connectorX - half + 2f, bottom + 2f);
+                          shape.lineTo(connectorX - half, bottom);
+                          shape.lineTo(left + 7f, bottom);
+                          shape.quadTo(left, bottom, left, bottom - 7f);
+                          shape.lineTo(left, top + 7f);
+                          shape.quadTo(left, top, left + 7f, top);
+                          shape.closePath();
+
+                          Color fill = selected ? blockColor.darker() : blockColor;
+                          g.setColor(new Color(0, 0, 0, 22));
+                          g.translate(0, 1);
+                          g.fill(shape);
+                          g.translate(0, -1);
+                          g.setColor(fill);
+                          g.fill(shape);
+                          g.setStroke(new BasicStroke(selected ? 2f : 1f));
+                          g.setColor(selected ? new Color(35, 73, 125) : fill.darker());
+                          g.draw(shape);
+
+                          // A subtle center connector makes adjacent rows read as a connected stack.
+                          g.setColor(new Color(0, 0, 0, 38));
+                          g.fillRoundRect(Math.round(connectorX - 3f), Math.round(top + 5f), 6, Math.max(4, getHeight() - 14), 6, 6);
+
+                          g.setColor(new Color(0, 0, 0, 64));
+                          g.fillRoundRect(Math.round(left + 7f), 16, 24, 19, 6, 6);
+                          g.setColor(Color.WHITE);
+                          g.setFont(new Font("Segoe UI", Font.BOLD, 9));
+                          FontMetrics numberMetrics = g.getFontMetrics();
+                          g.drawString(orderText, Math.round(left + 19f) - numberMetrics.stringWidth(orderText) / 2, 29);
+
+                          int textX = Math.round(indent + 43f);
+                          g.setFont(new Font("Segoe UI", Font.BOLD, 11));
+                          Color textColor = contrastTextColor(fill);
+                          g.setColor(textColor);
+                          g.drawString(titleText, textX, 21);
+                          g.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+                          drawMacroDetail(g, detailText, textX, 39, Math.max(0, getWidth() - textX - 12), textColor);
+                      } finally {
+                          g.dispose();
+                      }
+                  }
+              }
+          '''
+          source = source[:renderer_start] + renderer + source[renderer_end:]
+
+          # Add a more helpful Repeat hint in the toolbox footer.
+          replace_once(
+              '<html>Drag blocks into the workspace. Drag Random onto a [ ] number slot. Repeat needs a matching End repeat.</html>',
+              '<html>Scroll for more blocks. Select Repeat, then add blocks after it to place them inside its loop. Random can be dropped into [ ] number slots.</html>',
+              "Update toolbox hint"
+          )
+
+          path.write_text(source, encoding="utf-8")
+          print("Applied v1.4.6 Macro editor, readable gray input chips, scrollable toolbox, compact connected blocks, paired Repeat blocks, and explicit macro-trigger handling.")
+          PY
+      - name: Compile Java source against JNativeHook
+        run: |
+          curl --fail --silent --show-error --location \
+            https://repo.maven.apache.org/maven2/com/github/kwhat/jnativehook/2.2.2/jnativehook-2.2.2.jar \
+            --output "$RUNNER_TEMP/jnativehook-2.2.2.jar"
+          mkdir -p "$RUNNER_TEMP/kss-classes"
+          javac --release 17 -encoding UTF-8 \
+            -classpath "$RUNNER_TEMP/jnativehook-2.2.2.jar" \
+            -d "$RUNNER_TEMP/kss-classes" \
+            KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java
+      - name: Run source integrity checks
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path("KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java")
+          s = p.read_text(encoding="utf-8")
+          required = [
+              "VerticalScrollBarPolicy.ALWAYS",
+              "setFixedCellHeight(54)",
+              "trigger.setForeground(new Color(91, 101, 116))",
+              "drawMacroDetail(g, detailText",
+              "findMatchingEndRepeat",
+              "Added Repeat with its matching End repeat",
+              "Macro matchingMacro = macroTriggerMap.get(triggerCode)",
+              "Trigger received: "
+          ]
+          missing = [item for item in required if item not in s]
+          if missing:
+              raise SystemExit("Missing expected macro editor changes: " + ", ".join(missing))
+          if "toolbox.setPreferredSize(new Dimension(142, 10))" in s:
+              raise SystemExit("The fixed toolbox height is still present.")
+          print("Macro editor checks passed.")
+          PY
+      - name: Package updated project
+        run: |
+          rm -f KeySequenceStudio_1.4.6_MacroEditorFix.zip
+          zip -qr KeySequenceStudio_1.4.6_MacroEditorFix.zip KeySequenceStudio_Simple
+          unzip -t KeySequenceStudio_1.4.6_MacroEditorFix.zip
+      - name: Commit updated project and ZIP
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add KeySequenceStudio_Simple
+          git add KeySequenceStudio_1.4.6_MacroEditorFix.zip
+          git commit -m "Improve macro editor blocks and repeat insertion"
+          git push
