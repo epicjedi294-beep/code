@@ -405,7 +405,8 @@ jobs:
                       selected = isSelected;
                       int depth = 0;
                       for (int i = 0; i < index; i++) {
-                          MacroBlockType prior = list.getModel().getElementAt(i).type;
+                          MacroBlock priorBlock = list.getModel().getElementAt(i);
+                          MacroBlockType prior = priorBlock.type;
                           if (prior == MacroBlockType.REPEAT || prior == MacroBlockType.FIND_PIXEL) depth++;
                           else if (prior == MacroBlockType.END_REPEAT || prior == MacroBlockType.END_IF) depth = Math.max(0, depth - 1);
                       }
