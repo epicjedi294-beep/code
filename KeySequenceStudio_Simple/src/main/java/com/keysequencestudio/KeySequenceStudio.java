@@ -582,17 +582,59 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         toolbox.add(Box.createVerticalStrut(5));
     }
 
+    // Choose near-black or white according to which gives stronger contrast on the block color.
+    private static Color contrastTextColor(Color background) {
+        double luminance = 0.2126 * linearSrgb(background.getRed())
+                + 0.7152 * linearSrgb(background.getGreen())
+                + 0.0722 * linearSrgb(background.getBlue());
+        Color dark = new Color(25, 31, 42);
+        double darkLuminance = 0.2126 * linearSrgb(dark.getRed())
+                + 0.7152 * linearSrgb(dark.getGreen())
+                + 0.0722 * linearSrgb(dark.getBlue());
+        double whiteContrast = 1.05 / (luminance + 0.05);
+        double darkContrast = (luminance + 0.05) / (darkLuminance + 0.05);
+        return whiteContrast >= darkContrast ? Color.WHITE : dark;
+    }
+
+    private static double linearSrgb(int channel) {
+        double value = channel / 255.0;
+        return value <= 0.04045
+                ? value / 12.92
+                : Math.pow((value + 0.055) / 1.055, 2.4);
+    }
+
     private JButton createToolboxBlockButton(String label, MacroBlockType type, Color color) {
-        JButton button = new JButton(label);
+        // Draw the colored button surface ourselves. Some Windows Swing themes ignore
+        // custom button backgrounds, which can otherwise leave white text on white.
+        JButton button = new JButton(label) {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            protected void paintComponent(Graphics graphics) {
+                Graphics2D g2 = (Graphics2D) graphics.create();
+                try {
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    Color fill = getBackground();
+                    if (getModel().isPressed()) fill = fill.darker();
+                    g2.setColor(fill);
+                    g2.fillRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 10, 10);
+                    g2.setColor(fill.darker());
+                    g2.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, 10, 10);
+                } finally {
+                    g2.dispose();
+                }
+                super.paintComponent(graphics);
+            }
+        };
         button.setFont(new Font("Segoe UI", Font.BOLD, 11));
         button.setHorizontalAlignment(SwingConstants.LEFT);
-        button.setForeground(Color.WHITE);
+        button.setForeground(contrastTextColor(color));
         button.setBackground(color);
         button.setFocusPainted(false);
-        button.setOpaque(true);
-        button.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(color.darker(), 1),
-                new EmptyBorder(7, 8, 7, 8)));
+        button.setContentAreaFilled(false);
+        button.setBorderPainted(false);
+        button.setOpaque(false);
+        button.setBorder(new EmptyBorder(7, 8, 7, 8));
         button.setAlignmentX(Component.LEFT_ALIGNMENT);
         button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
         button.setToolTipText(type == MacroBlockType.RANDOM_NUMBER
@@ -628,6 +670,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         macroToolboxButtons.add(button);
         return button;
     }
+
 
     private void installMacroBlockDragAndDrop() {
         macroBlockList.setDropMode(DropMode.ON_OR_INSERT);
