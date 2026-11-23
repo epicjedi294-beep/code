@@ -20,11 +20,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "9.6"
-      - name: Fix toolbox and block text contrast
+      - name: Fix macro toolbox contrast
         shell: bash
         run: |
           python3 <<'PY'
@@ -32,12 +28,21 @@ jobs:
 
           source_path = Path("KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java")
           source = source_path.read_text(encoding="utf-8")
+          method_marker = "    private JButton createToolboxBlockButton(String label, MacroBlockType type, Color color) {"
+          next_marker = "\n    private void installMacroBlockDragAndDrop()"
 
-          marker = "    private JButton createToolboxBlockButton(String label, MacroBlockType type, Color color) {"
-          if marker not in source:
-              raise SystemExit("Could not find the macro toolbox button method in the v1.4.4 source.")
+          if method_marker not in source or next_marker not in source:
+              raise SystemExit("Could not find the macro toolbox method in the v1.4.4 source.")
 
-          contrast_helper = """    // Pick whichever of near-black or white provides stronger contrast on a block color.
+          method_start = source.index(method_marker)
+          method_end = source.index(next_marker, method_start)
+          old_method = source[method_start:method_end]
+
+          if "Paint the colored surface ourselves" not in old_method:
+              if "button.setForeground(Color.WHITE);" not in old_method:
+                  raise SystemExit("The original toolbox button style did not match the expected v1.4.4 code.")
+
+              helper = """    // Choose near-black or white according to which gives stronger contrast on the block color.
               private static Color contrastTextColor(Color background) {
                   double luminance = 0.2126 * linearSrgb(background.getRed())
                           + 0.7152 * linearSrgb(background.getGreen())
@@ -60,21 +65,9 @@ jobs:
 
           """
 
-          if "private static Color contrastTextColor(Color background)" not in source:
-              source = source.replace(marker, contrast_helper + marker, 1)
-
-          old_button_start = """        JButton button = new JButton(label);
-                  button.setFont(new Font("Segoe UI", Font.BOLD, 11));
-                  button.setHorizontalAlignment(SwingConstants.LEFT);
-                  button.setForeground(Color.WHITE);
-                  button.setBackground(color);
-                  button.setFocusPainted(false);
-                  button.setOpaque(true);
-                  button.setBorder(BorderFactory.createCompoundBorder(
-                          BorderFactory.createLineBorder(color.darker(), 1),
-                          new EmptyBorder(7, 8, 7, 8)));"""
-          new_button_start = """        // Paint the colored surface ourselves instead of relying on the native Windows
-                  // Look & Feel, which may otherwise render a white button behind white text.
+              new_method = """    private JButton createToolboxBlockButton(String label, MacroBlockType type, Color color) {
+                  // Draw the colored button surface ourselves. Some Windows Swing themes ignore
+                  // custom button backgrounds, which can otherwise leave white text on white.
                   JButton button = new JButton(label) {
                       private static final long serialVersionUID = 1L;
 
@@ -103,47 +96,75 @@ jobs:
                   button.setContentAreaFilled(false);
                   button.setBorderPainted(false);
                   button.setOpaque(false);
-                  button.setBorder(new EmptyBorder(7, 8, 7, 8));"""
-          if old_button_start in source:
-              source = source.replace(old_button_start, new_button_start, 1)
-          elif "Paint the colored surface ourselves instead of relying on the native Windows" not in source:
-              raise SystemExit("Could not find the original toolbox button styling to replace.")
+                  button.setBorder(new EmptyBorder(7, 8, 7, 8));
+                  button.setAlignmentX(Component.LEFT_ALIGNMENT);
+                  button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+                  button.setToolTipText(type == MacroBlockType.RANDOM_NUMBER
+                          ? "Drag onto a numbered [ ] slot. Click to edit the random range."
+                          : "Click to add, or drag into the block workspace");
+                  button.addActionListener(event -> {
+                      if (type == MacroBlockType.RANDOM_NUMBER) editRandomReporterDefaults();
+                      else addMacroBlock(type);
+                  });
+                  button.addMouseListener(new java.awt.event.MouseAdapter() {
+                      @Override public void mousePressed(java.awt.event.MouseEvent event) {
+                          if (type == MacroBlockType.RANDOM_NUMBER) {
+                              button.setText("Random " + randomReporterMinimum + "–" + randomReporterMaximum);
+                          }
+                      }
+                  });
+                  button.setTransferHandler(new TransferHandler() {
+                      @Override public int getSourceActions(JComponent component) { return COPY; }
+                      @Override protected Transferable createTransferable(JComponent component) {
+                          if (type == MacroBlockType.RANDOM_NUMBER) {
+                              return new StringSelection("VALUE:RANDOM_NUMBER:" + randomReporterMinimum + ":" + randomReporterMaximum);
+                          }
+                          return new StringSelection("NEW:" + type.name());
+                      }
+                  });
+                  button.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+                      @Override public void mouseDragged(java.awt.event.MouseEvent event) {
+                          if ((event.getModifiersEx() & InputEvent.BUTTON1_DOWN_MASK) != 0) {
+                              button.getTransferHandler().exportAsDrag(button, event, TransferHandler.COPY);
+                          }
+                      }
+                  });
+                  macroToolboxButtons.add(button);
+                  return button;
+              }
 
-          old_stack_text = """                // Block label and editable-value summary.
-                          g.setFont(new Font("Segoe UI", Font.BOLD, 12));
-                          g.setColor(Color.WHITE);
-                          g.drawString(titleText, indent + 54, 25);
-                          g.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-                          g.setColor(new Color(255, 255, 255, 230));
-                          g.drawString(detailText, indent + 54, 43);"""
-          new_stack_text = """                // Use a contrasting label color on both the toolbox blocks and workspace blocks.
-                          Color labelColor = contrastTextColor(fill);
-                          g.setFont(new Font("Segoe UI", Font.BOLD, 12));
-                          g.setColor(labelColor);
-                          g.drawString(titleText, indent + 54, 25);
-                          g.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-                          g.setColor(labelColor.equals(Color.WHITE)
-                                  ? new Color(255, 255, 255, 230)
-                                  : new Color(25, 31, 42, 225));
-                          g.drawString(detailText, indent + 54, 43);"""
-          if old_stack_text in source:
-              source = source.replace(old_stack_text, new_stack_text, 1)
+          """
+              if "private static Color contrastTextColor(Color background)" not in source:
+                  source = source[:method_start] + helper + source[method_start:]
+                  method_start = source.index(method_marker)
+                  method_end = source.index(next_marker, method_start)
+              source = source[:method_start] + new_method + source[method_end:]
+          else:
+              print("Toolbox contrast fix is already present; leaving source unchanged.")
 
           source_path.write_text(source, encoding="utf-8")
-          print("Patched macro toolbox buttons with explicit colored painting and WCAG-style contrast text.")
+          print("Updated toolbox buttons to paint their colored backgrounds directly and use high-contrast text.")
           PY
-          python3 - <<'PY'
+          python3 <<'PY'
           from pathlib import Path
-          p = Path("KeySequenceStudio_Simple/build.gradle")
-          text = p.read_text(encoding="utf-8")
+          path = Path("KeySequenceStudio_Simple/build.gradle")
+          text = path.read_text(encoding="utf-8")
           if "version = '1.4.4'" in text:
               text = text.replace("version = '1.4.4'", "version = '1.4.5'", 1)
           elif "version = '1.4.5'" not in text:
-              raise SystemExit("Could not identify the current project version in build.gradle.")
-          p.write_text(text, encoding="utf-8")
+              raise SystemExit("Could not identify the project version in build.gradle.")
+          path.write_text(text, encoding="utf-8")
           PY
-      - name: Compile Java project
-        run: gradle -p KeySequenceStudio_Simple compileJava
+      - name: Compile against the real JNativeHook dependency
+        run: |
+          curl --fail --silent --show-error --location \
+            https://repo.maven.apache.org/maven2/com/github/kwhat/jnativehook/2.2.2/jnativehook-2.2.2.jar \
+            --output "$RUNNER_TEMP/jnativehook-2.2.2.jar"
+          mkdir -p "$RUNNER_TEMP/kss-classes"
+          javac --release 17 -encoding UTF-8 \
+            -classpath "$RUNNER_TEMP/jnativehook-2.2.2.jar" \
+            -d "$RUNNER_TEMP/kss-classes" \
+            KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java
       - name: Package updated project ZIP
         run: |
           rm -f KeySequenceStudio_1.4.5_ToolboxContrast.zip
@@ -152,8 +173,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java
-          git add KeySequenceStudio_Simple/build.gradle
+          git add KeySequenceStudio_Simple
           git add KeySequenceStudio_1.4.5_ToolboxContrast.zip
           git commit -m "Fix macro toolbox text contrast"
           git push
