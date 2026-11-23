@@ -593,7 +593,7 @@ jobs:
           p = Path("KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java")
           s = p.read_text(encoding="utf-8")
           required = [
-              "VerticalScrollBarPolicy.ALWAYS",
+              "ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS",
               "setFixedCellHeight(54)",
               "trigger.setForeground(new Color(91, 101, 116))",
               "drawMacroDetail(g, detailText",
