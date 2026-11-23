@@ -410,11 +410,16 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         JPanel editor = new JPanel(new BorderLayout(10, 0));
         editor.setOpaque(false);
         JScrollPane toolboxScroll = new JScrollPane(buildMacroToolboxPanel());
-        toolboxScroll.setPreferredSize(new Dimension(175, 360));
+        toolboxScroll.setPreferredSize(new Dimension(185, 360));
+        toolboxScroll.setMinimumSize(new Dimension(165, 0));
         toolboxScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        toolboxScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+        toolboxScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
+        toolboxScroll.getVerticalScrollBar().setUnitIncrement(20);
+        toolboxScroll.getVerticalScrollBar().setBlockIncrement(120);
+        toolboxScroll.getViewport().setBackground(new Color(242, 245, 249));
         toolboxScroll.setBorder(BorderFactory.createLineBorder(new Color(218, 224, 232)));
         styleScrollPane(toolboxScroll);
+        toolboxScroll.getViewport().setBackground(new Color(242, 245, 249));
         editor.add(toolboxScroll, BorderLayout.WEST);
 
         JPanel workspace = new JPanel(new BorderLayout(0, 6));
@@ -422,7 +427,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         JLabel workspaceTitle = new JLabel("BLOCK WORKSPACE");
         workspaceTitle.setFont(new Font("Segoe UI", Font.BOLD, 11));
         workspaceTitle.setForeground(new Color(88, 99, 113));
-        JLabel workspaceHint = new JLabel("Drag blocks to reorder or drag from the toolbox to add · double-click to edit");
+        JLabel workspaceHint = new JLabel("Select a block, then add from the toolbox after it · Repeat opens a body · double-click to edit · drag to reorder");
         workspaceHint.setFont(new Font("Segoe UI", Font.PLAIN, 10));
         workspaceHint.setForeground(new Color(112, 122, 136));
         JPanel workspaceHeader = new JPanel(new BorderLayout(0, 2));
@@ -433,7 +438,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
 
         styleList(macroBlockList);
         macroBlockList.setBackground(new Color(246, 248, 251));
-        macroBlockList.setFixedCellHeight(68);
+        macroBlockList.setFixedCellHeight(54);
         macroBlockList.setCellRenderer(new MacroBlockRenderer());
         macroBlockList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         macroBlockList.addMouseListener(new java.awt.event.MouseAdapter() {
@@ -518,7 +523,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         toolbox.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(new Color(218, 224, 232)),
                 new EmptyBorder(9, 8, 9, 8)));
-        toolbox.setPreferredSize(new Dimension(142, 10));
+        toolbox.setMinimumSize(new Dimension(150, 0));
 
         JLabel title = new JLabel("BLOCK TOOLBOX");
         title.setFont(new Font("Segoe UI", Font.BOLD, 10));
@@ -547,7 +552,6 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         addToolboxCategory(toolbox, "CONTROL");
         addToolboxBlock(toolbox, "Wait", MacroBlockType.WAIT, new Color(255, 171, 25));
         addToolboxBlock(toolbox, "Repeat", MacroBlockType.REPEAT, new Color(255, 171, 25));
-        addToolboxBlock(toolbox, "End repeat", MacroBlockType.END_REPEAT, new Color(226, 147, 31));
         addToolboxBlock(toolbox, "Stop macro", MacroBlockType.STOP, new Color(211, 76, 76));
         toolbox.add(Box.createVerticalStrut(8));
         addToolboxCategory(toolbox, "SENSING / OTHER");
@@ -559,7 +563,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         addToolboxCategory(toolbox, "OPERATORS");
         addToolboxBlock(toolbox, "Random 1–100", MacroBlockType.RANDOM_NUMBER, new Color(89, 192, 89));
         toolbox.add(Box.createVerticalStrut(12));
-        JLabel tip = new JLabel("<html>Drag blocks into the workspace. Drag Random onto a [ ] number slot. Repeat needs a matching End repeat.</html>");
+        JLabel tip = new JLabel("<html>Scroll for more blocks. Select Repeat, then add blocks after it to place them inside its loop. Random can be dropped into [ ] number slots.</html>");
         tip.setFont(new Font("Segoe UI", Font.PLAIN, 10));
         tip.setForeground(new Color(110, 120, 133));
         tip.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -626,7 +630,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
                 super.paintComponent(graphics);
             }
         };
-        button.setFont(new Font("Segoe UI", Font.BOLD, 11));
+        button.setFont(new Font("Segoe UI", Font.BOLD, 10));
         button.setHorizontalAlignment(SwingConstants.LEFT);
         button.setForeground(contrastTextColor(color));
         button.setBackground(color);
@@ -634,9 +638,9 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         button.setContentAreaFilled(false);
         button.setBorderPainted(false);
         button.setOpaque(false);
-        button.setBorder(new EmptyBorder(7, 8, 7, 8));
+        button.setBorder(new EmptyBorder(6, 8, 6, 8));
         button.setAlignmentX(Component.LEFT_ALIGNMENT);
-        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
         button.setToolTipText(type == MacroBlockType.RANDOM_NUMBER
                 ? "Drag onto a numbered [ ] slot. Click to edit the random range."
                 : "Click to add, or drag into the block workspace");
@@ -2499,6 +2503,10 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             editRandomReporterDefaults();
             return;
         }
+        if (type == MacroBlockType.END_REPEAT) {
+            statusLabel.setText("End repeat is added automatically when you create a Repeat block.");
+            return;
+        }
         insertMacroBlock(type, -1);
     }
 
@@ -2508,9 +2516,19 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             return;
         }
         Macro macro = macroList.getSelectedValue();
-        if (macro == null) { statusLabel.setText("Create or select a macro first."); return; }
-        if (macro.blocks.size() >= MAX_STEPS_PER_BIND) { statusLabel.setText("This macro has reached the block limit."); return; }
+        if (macro == null) {
+            statusLabel.setText("Create or select a macro first.");
+            return;
+        }
         if (type == null) return;
+
+        boolean addClosingRepeat = type == MacroBlockType.REPEAT;
+        int requiredSlots = addClosingRepeat ? 2 : 1;
+        if (macro.blocks.size() + requiredSlots > MAX_STEPS_PER_BIND) {
+            statusLabel.setText("This macro has reached the block limit.");
+            return;
+        }
+
         MacroBlock block = switch (type) {
             case KEY -> MacroBlock.key(KeyEvent.VK_A, DEFAULT_HOLD_MS);
             case MOUSE -> MacroBlock.mouse(NativeMouseEvent.BUTTON1, DEFAULT_HOLD_MS);
@@ -2519,9 +2537,9 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             case TYPE_TEXT -> MacroBlock.typeText("Hello world", 12);
             case SCROLL -> MacroBlock.scroll(-1);
             case RANDOM_WAIT -> MacroBlock.randomWait(50, 150); // Legacy save compatibility; no longer in the toolbox.
-            case RANDOM_NUMBER -> null; // Reporter blocks are dragged into a numeric input, never executed alone.
+            case RANDOM_NUMBER -> null;
             case REPEAT -> MacroBlock.repeat(3);
-            case END_REPEAT -> MacroBlock.marker(MacroBlockType.END_REPEAT);
+            case END_REPEAT -> null; // Matching close markers are inserted with Repeat.
             case STOP -> MacroBlock.marker(MacroBlockType.STOP);
             case BEEP -> MacroBlock.marker(MacroBlockType.BEEP);
             case COPY_TEXT -> MacroBlock.copyText("Text to copy");
@@ -2532,14 +2550,33 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             case END_IF -> MacroBlock.marker(MacroBlockType.END_IF);
         };
         if (block == null) return;
-        int index = requestedIndex < 0 ? macro.blocks.size() : Math.max(0, Math.min(requestedIndex, macro.blocks.size()));
-        macro.blocks.add(index, block);
+
+        int selectedIndex = macroBlockList.getSelectedIndex();
+        int index = requestedIndex < 0
+                ? (selectedIndex >= 0 ? selectedIndex + 1 : macro.blocks.size())
+                : Math.max(0, Math.min(requestedIndex, macro.blocks.size()));
+
+        synchronized (macro.blocks) {
+            macro.blocks.add(index, block);
+            if (addClosingRepeat) {
+                macro.blocks.add(index + 1, MacroBlock.marker(MacroBlockType.END_REPEAT));
+            }
+        }
+
         refreshMacroBlocks();
+        // Keep Repeat selected so the next toolbox action is inserted into its body.
+        // Subsequent actions remain inside the body until the user selects End Repeat.
         macroBlockList.setSelectedIndex(index);
         macroBlockList.ensureIndexIsVisible(index);
         persistBinds();
-        if (type == MacroBlockType.KEY || type == MacroBlockType.MOUSE) beginMacroBlockInputCapture(block);
-        else statusLabel.setText("Added " + block.description() + " block.");
+
+        if (type == MacroBlockType.KEY || type == MacroBlockType.MOUSE) {
+            beginMacroBlockInputCapture(block);
+        } else if (addClosingRepeat) {
+            statusLabel.setText("Added Repeat with its matching End repeat. Select Repeat and add blocks to place them inside.");
+        } else {
+            statusLabel.setText("Added " + block.description() + " block.");
+        }
     }
 
     private void beginMacroBlockInputCapture(MacroBlock block) {
@@ -2803,10 +2840,53 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         Macro macro = macroList.getSelectedValue();
         int index = macroBlockList.getSelectedIndex();
         if (macro == null || index < 0) return;
-        macro.blocks.remove(index);
+
+        MacroBlock selected = macro.blocks.get(index);
+        int partner = -1;
+        if (selected.type == MacroBlockType.REPEAT) {
+            partner = findMatchingEndRepeat(macro.blocks, index);
+        } else if (selected.type == MacroBlockType.END_REPEAT) {
+            partner = findMatchingStartRepeat(macro.blocks, index);
+        }
+
+        synchronized (macro.blocks) {
+            if (partner >= 0 && partner < macro.blocks.size()) {
+                int first = Math.min(index, partner);
+                int second = Math.max(index, partner);
+                macro.blocks.remove(second);
+                macro.blocks.remove(first);
+            } else {
+                macro.blocks.remove(index);
+            }
+        }
         refreshMacroBlocks();
-        macroBlockList.setSelectedIndex(Math.min(index, macroBlockListModel.size() - 1));
+        if (!macroBlockListModel.isEmpty()) {
+            macroBlockList.setSelectedIndex(Math.min(index, macroBlockListModel.size() - 1));
+        }
         persistBinds();
+        statusLabel.setText(partner >= 0
+                ? "Removed the Repeat block and its matching End repeat."
+                : "Removed macro block.");
+    }
+
+    private static int findMatchingEndRepeat(List<MacroBlock> blocks, int startIndex) {
+        int depth = 0;
+        for (int i = startIndex; i < blocks.size(); i++) {
+            MacroBlockType type = blocks.get(i).type;
+            if (type == MacroBlockType.REPEAT) depth++;
+            else if (type == MacroBlockType.END_REPEAT && --depth == 0) return i;
+        }
+        return -1;
+    }
+
+    private static int findMatchingStartRepeat(List<MacroBlock> blocks, int endIndex) {
+        int depth = 0;
+        for (int i = endIndex; i >= 0; i--) {
+            MacroBlockType type = blocks.get(i).type;
+            if (type == MacroBlockType.END_REPEAT) depth++;
+            else if (type == MacroBlockType.REPEAT && --depth == 0) return i;
+        }
+        return -1;
     }
 
     private void renameMacroTriggerLabel(Macro macro) {
@@ -3145,21 +3225,37 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             showNotification("Hold started", bindDisplayName(holdBind.displayName, holdBind.triggerKeyCode));
         }
 
-        if (macroRunning.get()) return;
         Macro matchingMacro = macroTriggerMap.get(triggerCode);
-        if (matchingMacro != null && matchingMacro.enabled && isMacrosRuntimeEnabled()) {
+        if (matchingMacro != null) {
+            if (!matchingMacro.enabled || !isMacrosRuntimeEnabled()) return;
+            if (macroRunning.get()) {
+                SwingUtilities.invokeLater(() -> statusLabel.setText(
+                        "Macro '" + matchingMacro.name + "' was triggered, but another automation is still running."));
+                return;
+            }
             List<MacroBlock> blocks = new ArrayList<>();
             synchronized (matchingMacro.blocks) {
                 for (MacroBlock block : matchingMacro.blocks) blocks.add(block.copy());
             }
-            if (blocks.isEmpty()) return;
-            int macroRepeats = matchingMacro.repeatCount;
             String macroName = matchingMacro.name;
-            if (!submitAutomation(AutomationCategory.MACRO, () -> runMacro(blocks, macroRepeats, macroName))) return;
+            int macroRepeats = matchingMacro.repeatCount;
+            if (blocks.isEmpty()) {
+                SwingUtilities.invokeLater(() -> statusLabel.setText(
+                        "Macro '" + macroName + "' has no blocks yet. Add blocks in the Macros tab."));
+                return;
+            }
+            logMacro("Trigger received: " + macroName + " (" + triggerName(triggerCode) + ")");
+            if (!submitAutomation(AutomationCategory.MACRO,
+                    () -> runMacro(blocks, macroRepeats, macroName))) {
+                SwingUtilities.invokeLater(() -> statusLabel.setText(
+                        "Could not start macro '" + macroName + "'. Another automation may be running."));
+                return;
+            }
             showNotification("Macro started", macroName);
             return;
         }
 
+        if (macroRunning.get()) return;
         Bind matching = findEnabledBind(triggerCode);
         if (matching == null) return;
 
@@ -4535,8 +4631,11 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             Color foreground = selected ? list.getSelectionForeground() : new Color(42, 51, 64);
             setBackground(selected ? list.getSelectionBackground() : list.getBackground());
             title.setForeground(foreground);
-            trigger.setForeground(selected ? new Color(218, 224, 232) : new Color(125, 135, 149));
-            details.setForeground(selected ? new Color(226, 231, 238) : new Color(101, 111, 125));
+            trigger.setForeground(new Color(91, 101, 116));
+            trigger.setOpaque(true);
+            trigger.setBackground(new Color(232, 235, 240));
+            trigger.setBorder(new EmptyBorder(2, 5, 2, 5));
+            details.setForeground(new Color(82, 93, 108));
             title.setText(bindDisplayName(bind.displayName, bind.triggerKeyCode));
             trigger.setText(bind.displayName == null || bind.displayName.isBlank()
                     ? "" : "[" + triggerName(bind.triggerKeyCode) + "]");
@@ -4567,8 +4666,11 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
                 int index, boolean selected, boolean focused) {
             setBackground(selected ? list.getSelectionBackground() : list.getBackground());
             title.setForeground(selected ? list.getSelectionForeground() : new Color(42, 51, 64));
-            trigger.setForeground(selected ? new Color(218, 224, 232) : new Color(125, 135, 149));
-            details.setForeground(selected ? new Color(226, 231, 238) : new Color(101, 111, 125));
+            trigger.setForeground(new Color(91, 101, 116));
+            trigger.setOpaque(true);
+            trigger.setBackground(new Color(232, 235, 240));
+            trigger.setBorder(new EmptyBorder(2, 5, 2, 5));
+            details.setForeground(new Color(82, 93, 108));
             title.setText(macro.name);
             trigger.setText(triggerSummary(macro.triggerCodes));
             details.setText(macro.blocks.size() + " blocks  ·  Repeat ×" + macro.repeatCount + "  ·  " + (macro.enabled ? "Enabled" : "Disabled"));
@@ -4588,52 +4690,109 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
                 : Integer.toString(fixedValue);
     }
 
+    private static void drawMacroDetail(Graphics2D g, String text, int x, int baseline,
+                                        int maxWidth, Color textColor) {
+        if (text == null || text.isEmpty() || maxWidth <= 0) return;
+        FontMetrics metrics = g.getFontMetrics();
+        int cursor = x;
+        int pos = 0;
+        while (pos < text.length() && cursor - x < maxWidth) {
+            int open = text.indexOf('[', pos);
+            if (open < 0) open = text.length();
+            if (open > pos) {
+                String plain = text.substring(pos, open);
+                int remaining = maxWidth - (cursor - x);
+                String draw = plain;
+                while (!draw.isEmpty() && metrics.stringWidth(draw) > remaining) {
+                    draw = draw.substring(0, draw.length() - 1);
+                }
+                if (!draw.isEmpty()) {
+                    g.setColor(textColor);
+                    g.drawString(draw, cursor, baseline);
+                    cursor += metrics.stringWidth(draw);
+                }
+                if (draw.length() < plain.length()) break;
+                pos = open;
+            }
+            if (pos >= text.length()) break;
+            int close = text.indexOf(']', pos + 1);
+            if (close < 0) {
+                String tail = text.substring(pos);
+                int remaining = maxWidth - (cursor - x);
+                String draw = tail;
+                while (!draw.isEmpty() && metrics.stringWidth(draw) > remaining) {
+                    draw = draw.substring(0, draw.length() - 1);
+                }
+                if (!draw.isEmpty()) {
+                    g.setColor(textColor);
+                    g.drawString(draw, cursor, baseline);
+                }
+                break;
+            }
+            String slot = text.substring(pos, close + 1);
+            int slotWidth = metrics.stringWidth(slot) + 8;
+            if (cursor - x + slotWidth > maxWidth) break;
+            int slotHeight = Math.max(14, metrics.getHeight() - 1);
+            int slotY = baseline - metrics.getAscent() + 1;
+            g.setColor(new Color(226, 231, 237));
+            g.fillRoundRect(cursor, slotY, slotWidth, slotHeight, 6, 6);
+            g.setColor(new Color(78, 89, 105));
+            g.drawString(slot, cursor + 4, baseline);
+            cursor += slotWidth + 3;
+            pos = close + 1;
+        }
+    }
+
     private static final class MacroBlockRenderer extends JPanel implements ListCellRenderer<MacroBlock> {
         private static final long serialVersionUID = 1L;
         private Color blockColor = new Color(76, 151, 255);
         private String orderText = "01";
         private String titleText = "PRESS KEY";
-        private String detailText = "[ A ]  hold for 20 ms";
+        private String detailText = "[ A ]  hold [ 20 ] ms";
         private boolean selected;
         private int indent;
 
         private MacroBlockRenderer() {
             setOpaque(false);
-            setPreferredSize(new Dimension(380, 68));
+            setPreferredSize(new Dimension(360, 54));
         }
 
-        @Override public Component getListCellRendererComponent(JList<? extends MacroBlock> list, MacroBlock block,
+        @Override
+        public Component getListCellRendererComponent(JList<? extends MacroBlock> list, MacroBlock block,
                 int index, boolean isSelected, boolean focused) {
             blockColor = switch (block.type) {
-                case KEY -> new Color(76, 151, 255);                 // Motion / Events blue
+                case KEY -> new Color(76, 151, 255);
                 case MOUSE, SCROLL, MOVE_MOUSE, MOVE_MOUSE_REL -> new Color(76, 151, 255);
-                case WAIT, RANDOM_WAIT, REPEAT, END_REPEAT -> new Color(255, 171, 25); // Control orange
-                case NOTIFY -> new Color(153, 102, 255);             // Looks purple
-                case BEEP -> new Color(207, 99, 207);                // Sound pink/purple
+                case WAIT, RANDOM_WAIT, REPEAT, END_REPEAT -> new Color(255, 171, 25);
+                case NOTIFY -> new Color(153, 102, 255);
+                case BEEP -> new Color(207, 99, 207);
                 case TYPE_TEXT -> new Color(49, 132, 208);
                 case STOP -> new Color(211, 76, 76);
-                case COPY_TEXT, FIND_PIXEL, END_IF -> new Color(92, 177, 214); // Sensing cyan
+                case COPY_TEXT, FIND_PIXEL, END_IF -> new Color(92, 177, 214);
                 case COMMENT -> new Color(119, 130, 145);
-                case RANDOM_NUMBER -> new Color(89, 192, 89);        // Operators green
+                case RANDOM_NUMBER -> new Color(89, 192, 89);
             };
             selected = isSelected;
             int depth = 0;
             for (int i = 0; i < index; i++) {
-                MacroBlock prior = list.getModel().getElementAt(i);
-                if (prior.type == MacroBlockType.REPEAT || prior.type == MacroBlockType.FIND_PIXEL) depth++;
-                else if (prior.type == MacroBlockType.END_REPEAT || prior.type == MacroBlockType.END_IF) depth = Math.max(0, depth - 1);
+                MacroBlock priorBlock = list.getModel().getElementAt(i);
+                MacroBlockType prior = priorBlock.type;
+                if (prior == MacroBlockType.REPEAT || prior == MacroBlockType.FIND_PIXEL) depth++;
+                else if (prior == MacroBlockType.END_REPEAT || prior == MacroBlockType.END_IF) depth = Math.max(0, depth - 1);
             }
-            if (block.type == MacroBlockType.END_REPEAT || block.type == MacroBlockType.END_IF) depth = Math.max(0, depth - 1);
-            indent = Math.min(90, depth * 18);
+            if (block.type == MacroBlockType.END_REPEAT || block.type == MacroBlockType.END_IF) {
+                depth = Math.max(0, depth - 1);
+            }
+            indent = Math.min(60, depth * 12);
             orderText = String.format(Locale.ROOT, "%02d", index + 1);
             switch (block.type) {
                 case KEY -> {
                     titleText = "PRESS KEY";
-                    detailText = "[ " + keyName(block.code) + " ]     hold [ " + numericSlotText(block, block.milliseconds) + " ] ms";
+                    detailText = "[ " + keyName(block.code) + " ]  hold [ " + numericSlotText(block, block.milliseconds) + " ] ms";
                 }
                 case MOUSE -> {
                     titleText = "CLICK MOUSE";
-                    detailText = "[ " + mouseStepName(block.code) + " ]     hold [ " + numericSlotText(block, block.milliseconds) + " ] ms";
+                    detailText = "[ " + mouseStepName(block.code) + " ]  hold [ " + numericSlotText(block, block.milliseconds) + " ] ms";
                 }
                 case WAIT -> {
                     titleText = "WAIT";
@@ -4658,11 +4817,11 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
                 }
                 case REPEAT -> {
                     titleText = "REPEAT";
-                    detailText = "repeat enclosed blocks [ " + numericSlotText(block, block.code) + " ] times";
+                    detailText = "repeat [ " + numericSlotText(block, block.code) + " ] times  ·  body below";
                 }
                 case END_REPEAT -> {
                     titleText = "END REPEAT";
-                    detailText = "close the most recent Repeat block";
+                    detailText = "closes the Repeat block above";
                 }
                 case STOP -> {
                     titleText = "STOP MACRO";
@@ -4686,11 +4845,11 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
                 }
                 case MOVE_MOUSE -> {
                     titleText = "MOVE MOUSE TO";
-                    detailText = "x: [ " + numericSlotText(block, block.code) + " ]   y: [ " + numericSlotText(block, block.milliseconds) + " ]";
+                    detailText = "x: [ " + numericSlotText(block, block.code) + " ]  y: [ " + numericSlotText(block, block.milliseconds) + " ]";
                 }
                 case MOVE_MOUSE_REL -> {
                     titleText = "MOVE MOUSE BY";
-                    detailText = "dx: [ " + numericSlotText(block, block.code) + " ]   dy: [ " + numericSlotText(block, block.milliseconds) + " ]";
+                    detailText = "dx: [ " + numericSlotText(block, block.code) + " ]  dy: [ " + numericSlotText(block, block.milliseconds) + " ]";
                 }
                 case FIND_PIXEL -> {
                     titleText = "IF PIXEL FOUND";
@@ -4699,52 +4858,49 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
                 }
                 case END_IF -> {
                     titleText = "END IF";
-                    detailText = "close the most recent If pixel found block";
+                    detailText = "closes the If pixel found block";
                 }
             }
             return this;
         }
 
-        @Override protected void paintComponent(Graphics graphics) {
+        @Override
+        protected void paintComponent(Graphics graphics) {
             super.paintComponent(graphics);
             Graphics2D g = (Graphics2D) graphics.create();
             try {
                 g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                float left = (float) indent;
-                float right = getWidth() - 1f;
-                float top = 0f;
-                float bottom = getHeight() - 12f;
-                float centerLeft = left + 30f;
-                float centerRight = centerLeft + 22f;
+                float left = indent + 2f;
+                float right = getWidth() - 5f;
+                float top = 1f;
+                float bottom = getHeight() - 8f;
+                float connectorX = left + 28f;
+                float half = 8f;
+                float socketDepth = 7f;
                 Path2D.Float shape = new Path2D.Float();
-                // Scratch-style stack block: rounded left edge + classic top socket / bottom tab.
-                // Blocks can be dragged into a different stack order.
-                float corner = 8f;
-                float notchDepth = 10f;
-                float notchHalf = 11f;
-                shape.moveTo(left + corner, top);
-                shape.lineTo(centerLeft - notchHalf, top);
-                // Top socket (indent)
-                shape.lineTo(centerLeft - notchHalf + 3f, top + 4f);
-                shape.quadTo(centerLeft, top + notchDepth, centerLeft + notchHalf - 3f, top + 4f);
-                shape.lineTo(centerLeft + notchHalf, top);
-                shape.lineTo(right - corner, top);
-                shape.quadTo(right, top, right, top + corner);
-                shape.lineTo(right, bottom - corner);
-                shape.quadTo(right, bottom, right - corner, bottom);
-                shape.lineTo(centerLeft + notchHalf, bottom);
-                // Bottom tab (protrusion)
-                shape.lineTo(centerLeft + notchHalf - 3f, bottom + 4f);
-                shape.quadTo(centerLeft, bottom + notchDepth, centerLeft - notchHalf + 3f, bottom + 4f);
-                shape.lineTo(centerLeft - notchHalf, bottom);
-                shape.lineTo(left + corner, bottom);
-                shape.quadTo(left, bottom, left, bottom - corner);
-                shape.lineTo(left, top + corner);
-                shape.quadTo(left, top, left + corner, top);
+                shape.moveTo(left + 7f, top);
+                shape.lineTo(connectorX - half, top);
+                // Top socket: a compact Scratch-style indentation.
+                shape.lineTo(connectorX - half + 2f, top + 2f);
+                shape.quadTo(connectorX, top + socketDepth, connectorX + half - 2f, top + 2f);
+                shape.lineTo(connectorX + half, top);
+                shape.lineTo(right - 7f, top);
+                shape.quadTo(right, top, right, top + 7f);
+                shape.lineTo(right, bottom - 7f);
+                shape.quadTo(right, bottom, right - 7f, bottom);
+                shape.lineTo(connectorX + half, bottom);
+                // Bottom tab reaches the cell edge so adjacent blocks read as one stack.
+                shape.lineTo(connectorX + half - 2f, bottom + 2f);
+                shape.quadTo(connectorX, bottom + socketDepth, connectorX - half + 2f, bottom + 2f);
+                shape.lineTo(connectorX - half, bottom);
+                shape.lineTo(left + 7f, bottom);
+                shape.quadTo(left, bottom, left, bottom - 7f);
+                shape.lineTo(left, top + 7f);
+                shape.quadTo(left, top, left + 7f, top);
                 shape.closePath();
 
                 Color fill = selected ? blockColor.darker() : blockColor;
-                g.setColor(new Color(0, 0, 0, 24));
+                g.setColor(new Color(0, 0, 0, 22));
                 g.translate(0, 1);
                 g.fill(shape);
                 g.translate(0, -1);
@@ -4754,21 +4910,24 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
                 g.setColor(selected ? new Color(35, 73, 125) : fill.darker());
                 g.draw(shape);
 
-                // Step number chip.
-                g.setColor(new Color(0, 0, 0, 48));
-                g.fillRoundRect(indent + 12, 19, 30, 23, 7, 7);
-                g.setColor(Color.WHITE);
-                g.setFont(new Font("Segoe UI", Font.BOLD, 10));
-                FontMetrics numberMetrics = g.getFontMetrics();
-                g.drawString(orderText, indent + 27 - numberMetrics.stringWidth(orderText) / 2, 34);
+                // A subtle center connector makes adjacent rows read as a connected stack.
+                g.setColor(new Color(0, 0, 0, 38));
+                g.fillRoundRect(Math.round(connectorX - 3f), Math.round(top + 5f), 6, Math.max(4, getHeight() - 14), 6, 6);
 
-                // Block label and editable-value summary.
-                g.setFont(new Font("Segoe UI", Font.BOLD, 12));
+                g.setColor(new Color(0, 0, 0, 64));
+                g.fillRoundRect(Math.round(left + 7f), 16, 24, 19, 6, 6);
                 g.setColor(Color.WHITE);
-                g.drawString(titleText, indent + 54, 25);
-                g.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-                g.setColor(new Color(255, 255, 255, 230));
-                g.drawString(detailText, indent + 54, 43);
+                g.setFont(new Font("Segoe UI", Font.BOLD, 9));
+                FontMetrics numberMetrics = g.getFontMetrics();
+                g.drawString(orderText, Math.round(left + 19f) - numberMetrics.stringWidth(orderText) / 2, 29);
+
+                int textX = Math.round(indent + 43f);
+                g.setFont(new Font("Segoe UI", Font.BOLD, 11));
+                Color textColor = contrastTextColor(fill);
+                g.setColor(textColor);
+                g.drawString(titleText, textX, 21);
+                g.setFont(new Font("Segoe UI", Font.PLAIN, 10));
+                drawMacroDetail(g, detailText, textX, 39, Math.max(0, getWidth() - textX - 12), textColor);
             } finally {
                 g.dispose();
             }
@@ -4949,8 +5108,11 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             Color foreground = selected ? list.getSelectionForeground() : new Color(42, 51, 64);
             setBackground(selected ? list.getSelectionBackground() : list.getBackground());
             title.setForeground(foreground);
-            trigger.setForeground(selected ? new Color(218, 224, 232) : new Color(125, 135, 149));
-            details.setForeground(selected ? new Color(226, 231, 238) : new Color(101, 111, 125));
+            trigger.setForeground(new Color(91, 101, 116));
+            trigger.setOpaque(true);
+            trigger.setBackground(new Color(232, 235, 240));
+            trigger.setBorder(new EmptyBorder(2, 5, 2, 5));
+            details.setForeground(new Color(82, 93, 108));
             title.setText(bindDisplayName(bind.displayName, bind.triggerCodes));
             trigger.setText(bind.displayName == null || bind.displayName.isBlank()
                     ? "" : triggerSummary(bind.triggerCodes));
