@@ -390,7 +390,7 @@ jobs:
                               }
                               pc++;
                           }
-  """,
+          """,
               "Use found point for Move Mouse To inside detection block"
           )
 
@@ -423,7 +423,7 @@ jobs:
                                   pc = skipToMatchingEndIf(blocks, pc);
                               }
                           }
-  """,
+          """,
               "Carry detected pixel/image position into conditional body"
           )
 
@@ -435,7 +435,7 @@ jobs:
                               logMacro("End if");
                               pc++;
                           }
-  """,
+          """,
               "Restore previous detected point when leaving Find block"
           )
 
