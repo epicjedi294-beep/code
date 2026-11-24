@@ -20,6 +20,7 @@ import java.awt.datatransfer.DataFlavor;
 import java.awt.datatransfer.StringSelection;
 import java.awt.datatransfer.Transferable;
 import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
@@ -557,6 +558,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         addToolboxCategory(toolbox, "SENSING / OTHER");
         addToolboxBlock(toolbox, "Copy text", MacroBlockType.COPY_TEXT, new Color(92, 177, 214));
         addToolboxBlock(toolbox, "If pixel found", MacroBlockType.FIND_PIXEL, new Color(92, 177, 214));
+        addToolboxBlock(toolbox, "Look for image", MacroBlockType.FIND_IMAGE, new Color(92, 177, 214));
         addToolboxBlock(toolbox, "End if", MacroBlockType.END_IF, new Color(70, 140, 170));
         addToolboxBlock(toolbox, "Comment", MacroBlockType.COMMENT, new Color(119, 130, 145));
         toolbox.add(Box.createVerticalStrut(8));
@@ -2523,7 +2525,8 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         if (type == null) return;
 
         boolean addClosingRepeat = type == MacroBlockType.REPEAT;
-        int requiredSlots = addClosingRepeat ? 2 : 1;
+        boolean addClosingIf = type == MacroBlockType.FIND_IMAGE;
+        int requiredSlots = (addClosingRepeat || addClosingIf) ? 2 : 1;
         if (macro.blocks.size() + requiredSlots > MAX_STEPS_PER_BIND) {
             statusLabel.setText("This macro has reached the block limit.");
             return;
@@ -2547,6 +2550,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             case MOVE_MOUSE -> MacroBlock.moveMouse(100, 100);
             case MOVE_MOUSE_REL -> MacroBlock.moveMouseRel(50, 0);
             case FIND_PIXEL -> MacroBlock.findPixel(0, 0, 200, 200, 0xFF0000, 15);
+            case FIND_IMAGE -> MacroBlock.findImage();
             case END_IF -> MacroBlock.marker(MacroBlockType.END_IF);
         };
         if (block == null) return;
@@ -2560,6 +2564,8 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             macro.blocks.add(index, block);
             if (addClosingRepeat) {
                 macro.blocks.add(index + 1, MacroBlock.marker(MacroBlockType.END_REPEAT));
+            } else if (addClosingIf) {
+                macro.blocks.add(index + 1, MacroBlock.marker(MacroBlockType.END_IF));
             }
         }
 
@@ -2574,6 +2580,9 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             beginMacroBlockInputCapture(block);
         } else if (addClosingRepeat) {
             statusLabel.setText("Added Repeat with its matching End repeat. Select Repeat and add blocks to place them inside.");
+        } else if (addClosingIf) {
+            statusLabel.setText("Added Look for image with End if. Capture a small UI image, then add actions inside the block.");
+            editSelectedMacroBlock();
         } else {
             statusLabel.setText("Added " + block.description() + " block.");
         }
@@ -2705,13 +2714,26 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             case RANDOM_NUMBER -> editRandomReporterDefaults();
             case MOVE_MOUSE, MOVE_MOUSE_REL -> {
                 boolean relative = block.type == MacroBlockType.MOVE_MOUSE_REL;
-                JSpinner xSpinner = new JSpinner(new SpinnerNumberModel(block.code, relative ? -10_000 : 0, 10_000, 1));
-                JSpinner ySpinner = new JSpinner(new SpinnerNumberModel(block.milliseconds, relative ? -10_000 : 0, 10_000, 1));
-                JPanel panel = new JPanel(new GridLayout(2, 2, 8, 6));
-                panel.add(new JLabel(relative ? "Change X by:" : "Screen X:"));
-                panel.add(xSpinner);
-                panel.add(new JLabel(relative ? "Change Y by:" : "Screen Y:"));
-                panel.add(ySpinner);
+                JSpinner xSpinner = new JSpinner(new SpinnerNumberModel(block.code, relative ? -10_000 : -20_000, relative ? 10_000 : 20_000, 1));
+                JSpinner ySpinner = new JSpinner(new SpinnerNumberModel(block.milliseconds, relative ? -10_000 : -20_000, relative ? 10_000 : 20_000, 1));
+                JPanel coordinates = new JPanel(new GridLayout(2, 2, 8, 6));
+                coordinates.add(new JLabel(relative ? "Change X by:" : "Screen X:"));
+                coordinates.add(xSpinner);
+                coordinates.add(new JLabel(relative ? "Change Y by:" : "Screen Y:"));
+                coordinates.add(ySpinner);
+                JPanel panel = new JPanel(new BorderLayout(0, 8));
+                panel.add(coordinates, BorderLayout.CENTER);
+                if (!relative) {
+                    JButton pickPoint = new JButton("Pick coordinates from screen…");
+                    pickPoint.setToolTipText("Click the destination point on your desktop to fill X and Y.");
+                    pickPoint.addActionListener(event -> showScreenSelectionOverlay(
+                            "Click the point where the mouse should move · Esc cancels", false, picked -> {
+                                xSpinner.setValue(picked.x);
+                                ySpinner.setValue(picked.y);
+                                statusLabel.setText("Picked screen position " + picked.x + "," + picked.y + ".");
+                            }));
+                    panel.add(pickPoint, BorderLayout.SOUTH);
+                }
                 String title = relative ? "Edit move mouse by" : "Edit move mouse to";
                 if (JOptionPane.showConfirmDialog(this, panel, title, JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
                     block.code = ((Number) xSpinner.getValue()).intValue();
@@ -2722,8 +2744,204 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
                 }
             }
             case FIND_PIXEL -> editFindPixelBlock(block);
+            case FIND_IMAGE -> editFindImageBlock(block);
         }
     }
+
+
+private Rectangle virtualScreenBounds() {
+    Rectangle bounds = null;
+    for (GraphicsDevice device : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
+        Rectangle screen = device.getDefaultConfiguration().getBounds();
+        bounds = bounds == null ? new Rectangle(screen) : bounds.union(screen);
+    }
+    return bounds == null ? new Rectangle(Toolkit.getDefaultToolkit().getScreenSize()) : bounds;
+}
+
+/**
+ * Shows a frozen screenshot overlay so the user can pick an absolute point or drag
+ * a small reference region. The overlay is disposed before the callback runs.
+ */
+private void showScreenSelectionOverlay(String instruction, boolean dragToSelect,
+        java.util.function.Consumer<Rectangle> onSelection) {
+    final Rectangle desktopBounds = virtualScreenBounds();
+    final BufferedImage desktopImage;
+    try {
+        desktopImage = robot.createScreenCapture(desktopBounds);
+    } catch (Exception exception) {
+        statusLabel.setText("Could not capture the desktop: " + exception.getMessage());
+        return;
+    }
+
+    final JWindow overlay = new JWindow();
+    overlay.setBounds(desktopBounds);
+    overlay.setAlwaysOnTop(true);
+    overlay.setFocusableWindowState(true);
+    overlay.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+
+    JComponent canvas = new JComponent() {
+        private static final long serialVersionUID = 1L;
+        private Point anchor;
+        private Point current;
+
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            Graphics2D g = (Graphics2D) graphics.create();
+            try {
+                g.drawImage(desktopImage, 0, 0, null);
+                g.setColor(new Color(12, 18, 28, 72));
+                g.fillRect(0, 0, getWidth(), getHeight());
+                g.setColor(new Color(20, 29, 43, 225));
+                g.fillRoundRect(14, 14, Math.min(getWidth() - 28, 650), 42, 10, 10);
+                g.setColor(Color.WHITE);
+                g.setFont(new Font("Segoe UI", Font.BOLD, 14));
+                g.drawString(instruction, 27, 40);
+                if (anchor != null && current != null && dragToSelect) {
+                    int x = Math.min(anchor.x, current.x);
+                    int y = Math.min(anchor.y, current.y);
+                    int w = Math.abs(anchor.x - current.x);
+                    int h = Math.abs(anchor.y - current.y);
+                    g.setColor(new Color(55, 170, 255, 55));
+                    g.fillRect(x, y, w, h);
+                    g.setColor(new Color(25, 120, 220));
+                    g.setStroke(new BasicStroke(2f));
+                    g.drawRect(x, y, w, h);
+                }
+            } finally {
+                g.dispose();
+            }
+        }
+    };
+    canvas.setFocusable(true);
+    canvas.addMouseListener(new java.awt.event.MouseAdapter() {
+        @Override
+        public void mousePressed(java.awt.event.MouseEvent event) {
+            /* picker placeholder removed */
+        }
+    });
+    // Mouse handling is installed below using a small state holder so the picker
+    // can safely keep its selection local to this overlay.
+    final Point[] points = new Point[2];
+    canvas.addMouseListener(new java.awt.event.MouseAdapter() {
+        @Override
+        public void mousePressed(java.awt.event.MouseEvent event) {
+            points[0] = event.getPoint();
+            points[1] = event.getPoint();
+            canvas.repaint();
+        }
+
+        @Override
+        public void mouseReleased(java.awt.event.MouseEvent event) {
+            if (points[0] == null) return;
+            points[1] = event.getPoint();
+            Rectangle local = new Rectangle(
+                    Math.min(points[0].x, points[1].x),
+                    Math.min(points[0].y, points[1].y),
+                    Math.max(1, Math.abs(points[0].x - points[1].x)),
+                    Math.max(1, Math.abs(points[0].y - points[1].y)));
+            if (dragToSelect && (local.width < 5 || local.height < 5)) {
+                points[0] = null;
+                points[1] = null;
+                canvas.repaint();
+                statusLabel.setText("Drag a rectangle at least 5 × 5 pixels around the item.");
+                return;
+            }
+            Rectangle selected = new Rectangle(
+                    desktopBounds.x + local.x,
+                    desktopBounds.y + local.y,
+                    dragToSelect ? local.width : 0,
+                    dragToSelect ? local.height : 0);
+            overlay.dispose();
+            SwingUtilities.invokeLater(() -> onSelection.accept(selected));
+        }
+    });
+    canvas.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+        @Override
+        public void mouseDragged(java.awt.event.MouseEvent event) {
+            points[1] = event.getPoint();
+            canvas.repaint();
+        }
+
+        @Override
+        public void mouseMoved(java.awt.event.MouseEvent event) {
+            if (points[0] != null) {
+                points[1] = event.getPoint();
+                canvas.repaint();
+            }
+        }
+    });
+    canvas.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+            KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "cancelScreenPicker");
+    canvas.getActionMap().put("cancelScreenPicker", new AbstractAction() {
+        private static final long serialVersionUID = 1L;
+        @Override
+        public void actionPerformed(java.awt.event.ActionEvent event) {
+            overlay.dispose();
+            statusLabel.setText("Screen picker cancelled.");
+        }
+    });
+    overlay.setContentPane(canvas);
+    overlay.setVisible(true);
+    canvas.requestFocusInWindow();
+}
+
+private void editFindImageBlock(MacroBlock block) {
+    JTextField pathField = new JTextField(block.text, 30);
+    pathField.setEditable(false);
+    JLabel referenceStatus = new JLabel(block.text.isBlank()
+            ? "No visual reference captured yet."
+            : "Saved reference: " + Path.of(block.text).getFileName());
+    JButton captureButton = new JButton("Capture a small image from screen…");
+    captureButton.setToolTipText("Drag a tight rectangle around a UI icon, button, or other desktop item.");
+    captureButton.addActionListener(event -> showScreenSelectionOverlay(
+            "Drag around the UI image to look for · Esc cancels", true, selected -> {
+                try {
+                    if (selected.width > 256 || selected.height > 256) {
+                        JOptionPane.showMessageDialog(this,
+                                "Choose a smaller area (maximum 256 × 256 pixels).",
+                                "Reference image too large", JOptionPane.WARNING_MESSAGE);
+                        return;
+                    }
+                    BufferedImage captured = robot.createScreenCapture(selected);
+                    Path directory = Path.of(System.getProperty("user.home"), ".kss", "targets");
+                    Files.createDirectories(directory);
+                    Path target = directory.resolve("visual-" + System.nanoTime() + ".png");
+                    if (!ImageIO.write(captured, "png", target.toFile())) {
+                        throw new IOException("PNG image writer is unavailable.");
+                    }
+                    String savedPath = target.toAbsolutePath().toString();
+                    if (savedPath.length() > 180) {
+                        Files.deleteIfExists(target);
+                        throw new IOException("The saved reference path is too long for the macro settings file.");
+                    }
+                    pathField.setText(savedPath);
+                    referenceStatus.setText("Saved reference: " + target.getFileName());
+                    statusLabel.setText("Captured visual reference " + target.getFileName() + ".");
+                } catch (Exception exception) {
+                    statusLabel.setText("Could not save visual reference: " + exception.getMessage());
+                }
+            }));
+    JPanel panel = new JPanel(new BorderLayout(0, 8));
+    panel.add(new JLabel("<html><b>Look for image</b><br>Drag a small rectangle around a desktop UI icon or button. When this same image is visible on the desktop, blocks between this block and End if will run.</html>"), BorderLayout.NORTH);
+    JPanel center = new JPanel(new BorderLayout(0, 5));
+    center.add(captureButton, BorderLayout.NORTH);
+    center.add(pathField, BorderLayout.CENTER);
+    center.add(referenceStatus, BorderLayout.SOUTH);
+    panel.add(center, BorderLayout.CENTER);
+    if (JOptionPane.showConfirmDialog(this, panel, "Edit Look for image block",
+            JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION) {
+        String path = pathField.getText().trim();
+        if (path.isBlank() || !Files.isRegularFile(Path.of(path))) {
+            JOptionPane.showMessageDialog(this, "Capture a visual reference before saving this block.",
+                    "Visual reference required", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        block.text = path;
+        macroBlockList.repaint();
+        persistBinds();
+        statusLabel.setText("Saved Look for image block. Add actions between it and End if.");
+    }
+}
 
     private void editFindPixelBlock(MacroBlock block) {
         JSpinner xSpinner = new JSpinner(new SpinnerNumberModel(block.searchX, -10_000, 20_000, 1));
@@ -3430,12 +3648,66 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         return null;
     }
 
-    /** Advances pc past the matching END_IF for the IF_PIXEL at fromIndex (handles nesting). */
+
+/** Returns true when the saved visual reference is found on any attached desktop display. */
+private boolean findImageVisible(MacroBlock block) {
+    if (block.text == null || block.text.isBlank()) {
+        throw new IllegalStateException("Capture a visual reference in the Look for image block first.");
+    }
+    try {
+        Path referencePath = Path.of(block.text);
+        if (!Files.isRegularFile(referencePath)) {
+            throw new IOException("Visual reference file is missing: " + referencePath.getFileName());
+        }
+        BufferedImage reference = ImageIO.read(referencePath.toFile());
+        if (reference == null) throw new IOException("The visual reference is not a readable image.");
+        Rectangle bounds = virtualScreenBounds();
+        BufferedImage screen = robot.createScreenCapture(bounds);
+        int rw = reference.getWidth();
+        int rh = reference.getHeight();
+        if (rw < 5 || rh < 5 || rw > screen.getWidth() || rh > screen.getHeight()) return false;
+
+        int centerX = rw / 2;
+        int centerY = rh / 2;
+        int anchor = reference.getRGB(centerX, centerY);
+        final int tolerance = 42;
+        for (int y = 0; y <= screen.getHeight() - rh; y += 2) {
+            if (Thread.currentThread().isInterrupted()) return false;
+            for (int x = 0; x <= screen.getWidth() - rw; x += 2) {
+                if (!similarColor(screen.getRGB(x + centerX, y + centerY), anchor, tolerance)) continue;
+                boolean matches = true;
+                for (int gy = 0; gy <= 4 && matches; gy++) {
+                    int sampleY = (rh - 1) * gy / 4;
+                    for (int gx = 0; gx <= 4; gx++) {
+                        int sampleX = (rw - 1) * gx / 4;
+                        if (!similarColor(screen.getRGB(x + sampleX, y + sampleY),
+                                reference.getRGB(sampleX, sampleY), tolerance)) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                }
+                if (matches) return true;
+            }
+        }
+        return false;
+    } catch (IOException exception) {
+        throw new IllegalStateException("Could not scan for the saved visual reference: " + exception.getMessage(), exception);
+    }
+}
+
+private static boolean similarColor(int left, int right, int tolerance) {
+    return Math.abs(((left >> 16) & 0xFF) - ((right >> 16) & 0xFF)) <= tolerance
+            && Math.abs(((left >> 8) & 0xFF) - ((right >> 8) & 0xFF)) <= tolerance
+            && Math.abs((left & 0xFF) - (right & 0xFF)) <= tolerance;
+}
+
+    /** Advances pc past the matching END_IF for the IF_PIXEL / FIND_IMAGE at fromIndex (handles nesting). */
     private static int skipToMatchingEndIf(List<MacroBlock> blocks, int fromIndex) {
         int depth = 1;
         for (int i = fromIndex + 1; i < blocks.size(); i++) {
             MacroBlockType t = blocks.get(i).type;
-            if (t == MacroBlockType.FIND_PIXEL) depth++;
+            if (t == MacroBlockType.FIND_PIXEL || t == MacroBlockType.FIND_IMAGE) depth++;
             else if (t == MacroBlockType.END_IF) {
                 depth--;
                 if (depth == 0) return i + 1;
@@ -3592,6 +3864,16 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
                                 pc = skipToMatchingEndIf(blocks, pc);
                             }
                         }
+                        case FIND_IMAGE -> {
+                            boolean found = findImageVisible(block);
+                            if (found) {
+                                logMacro("Look for image: visual reference found → run enclosed blocks");
+                                pc++;
+                            } else {
+                                logMacro("Look for image: reference not found → skip enclosed blocks");
+                                pc = skipToMatchingEndIf(blocks, pc);
+                            }
+                        }
                         case END_IF -> {
                             logMacro("End if");
                             pc++;
@@ -3622,9 +3904,9 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             } else if (type == MacroBlockType.END_REPEAT) {
                 repeatDepth--;
                 if (repeatDepth < 0) return "End repeat at block " + (i + 1) + " has no matching Repeat block.";
-            } else if (type == MacroBlockType.FIND_PIXEL) {
+            } else if (type == MacroBlockType.FIND_PIXEL || type == MacroBlockType.FIND_IMAGE) {
                 ifDepth++;
-                if (ifDepth > MAX_MACRO_LOOP_DEPTH) return "If pixel blocks can be nested up to " + MAX_MACRO_LOOP_DEPTH + " levels.";
+                if (ifDepth > MAX_MACRO_LOOP_DEPTH) return "If / Look for image blocks can be nested up to " + MAX_MACRO_LOOP_DEPTH + " levels.";
             } else if (type == MacroBlockType.END_IF) {
                 ifDepth--;
                 if (ifDepth < 0) return "End if at block " + (i + 1) + " has no matching If pixel found block.";
@@ -4241,10 +4523,10 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             case REPEAT -> {
                 if (code < 1 || code > MAX_REPEAT_COUNT) throw new IOException("Invalid repeat count.");
             }
-            case END_REPEAT, END_IF, STOP, BEEP, COPY_TEXT, COMMENT, NOTIFY -> { /* no additional numeric values */ }
+            case END_REPEAT, END_IF, FIND_IMAGE, STOP, BEEP, COPY_TEXT, COMMENT, NOTIFY -> { /* no additional numeric values */ }
             case RANDOM_NUMBER -> throw new IOException("A random value reporter cannot be saved as a standalone action.");
             case MOVE_MOUSE -> {
-                if (code < 0 || code > 10_000 || milliseconds < 0 || milliseconds > 10_000)
+                if (code < -20_000 || code > 20_000 || milliseconds < -20_000 || milliseconds > 20_000)
                     throw new IOException("Invalid absolute mouse coordinates.");
             }
             case MOVE_MOUSE_REL -> {
@@ -4449,7 +4731,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         BEEP("Play beep"), COPY_TEXT("Copy text"), COMMENT("Comment"),
         RANDOM_NUMBER("Random number"),
         MOVE_MOUSE("Move mouse to"), MOVE_MOUSE_REL("Move mouse by"),
-        FIND_PIXEL("If pixel found"), END_IF("End if");
+        FIND_PIXEL("If pixel found"), END_IF("End if"), FIND_IMAGE("If image found");
         private final String label;
         MacroBlockType(String label) { this.label = label; }
         @Override public String toString() { return label; }
@@ -4513,6 +4795,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             block.colorTolerance = Math.max(0, Math.min(255, tolerance));
             return block;
         }
+        private static MacroBlock findImage() { return new MacroBlock(MacroBlockType.FIND_IMAGE, 0, 0, ""); }
 
         private MacroBlock copy() {
             MacroBlock copy = new MacroBlock(type, code, milliseconds, text, randomMinimum, randomMaximum);
@@ -4546,7 +4829,8 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
                 case FIND_PIXEL -> String.format(Locale.ROOT,
                         "If #%06X found in %d,%d %dx%d (±%d)",
                         colorRgb & 0xFFFFFF, searchX, searchY, searchW, searchH, colorTolerance);
-                case END_IF -> "End if (close If pixel found)";
+                case FIND_IMAGE -> "Look for image: " + (text.isBlank() ? "reference not set" : text);
+                case END_IF -> "End if (close If / Look for image)";
             };
         }
     }
@@ -4768,7 +5052,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
                 case BEEP -> new Color(207, 99, 207);
                 case TYPE_TEXT -> new Color(49, 132, 208);
                 case STOP -> new Color(211, 76, 76);
-                case COPY_TEXT, FIND_PIXEL, END_IF -> new Color(92, 177, 214);
+                case COPY_TEXT, FIND_PIXEL, FIND_IMAGE, END_IF -> new Color(92, 177, 214);
                 case COMMENT -> new Color(119, 130, 145);
                 case RANDOM_NUMBER -> new Color(89, 192, 89);
             };
@@ -4777,7 +5061,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             for (int i = 0; i < index; i++) {
                 MacroBlock priorBlock = list.getModel().getElementAt(i);
                 MacroBlockType prior = priorBlock.type;
-                if (prior == MacroBlockType.REPEAT || prior == MacroBlockType.FIND_PIXEL) depth++;
+                if (prior == MacroBlockType.REPEAT || prior == MacroBlockType.FIND_PIXEL || prior == MacroBlockType.FIND_IMAGE) depth++;
                 else if (prior == MacroBlockType.END_REPEAT || prior == MacroBlockType.END_IF) depth = Math.max(0, depth - 1);
             }
             if (block.type == MacroBlockType.END_REPEAT || block.type == MacroBlockType.END_IF) {
@@ -4856,9 +5140,13 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
                     detailText = String.format(Locale.ROOT, "#%06X  region %d,%d  %dx%d  tol %d",
                             block.colorRgb & 0xFFFFFF, block.searchX, block.searchY, block.searchW, block.searchH, block.colorTolerance);
                 }
+                case FIND_IMAGE -> {
+                    titleText = "LOOK FOR IMAGE";
+                    detailText = block.text.isBlank() ? "capture a small desktop UI reference" : "saved reference: " + Path.of(block.text).getFileName();
+                }
                 case END_IF -> {
                     titleText = "END IF";
-                    detailText = "closes the If pixel found block";
+                    detailText = "closes the If pixel found / Look for image block";
                 }
             }
             return this;
