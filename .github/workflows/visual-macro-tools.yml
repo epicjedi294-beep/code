@@ -353,15 +353,21 @@ jobs:
               }
           }
           '''
-          # Remove a no-op listener placeholder before insertion. The real listener is below.
+          # Remove the placeholder listener from the helper template.
+          screen_helpers = screen_helpers.replace("                      ((PointAccess) null);\\n", "")
+          # Keep drag-selection feedback visible while the screen reference is being selected.
           screen_helpers = screen_helpers.replace(
-              '              canvas.addMouseListener(new java.awt.event.MouseAdapter() {\n'
-              '                  @Override\n'
-              '                  public void mousePressed(java.awt.event.MouseEvent event) {\n'
-              '                      ((PointAccess) null);\n'
-              '                  }\n'
-              '              });\n',
-              ''
+              "              JComponent canvas = new JComponent() {",
+              "              final Point[] points = new Point[2];\\n              JComponent canvas = new JComponent() {"
+          )
+          screen_helpers = screen_helpers.replace("                  private Point anchor;\\n                  private Point current;\\n", "")
+          screen_helpers = screen_helpers.replace(
+              "                          if (anchor != null && current != null && dragToSelect) {\\n                              int x = Math.min(anchor.x, current.x);\\n                              int y = Math.min(anchor.y, current.y);\\n                              int w = Math.abs(anchor.x - current.x);\\n                              int h = Math.abs(anchor.y - current.y);",
+              "                          if (points[0] != null && points[1] != null && dragToSelect) {\\n                              int x = Math.min(points[0].x, points[1].x);\\n                              int y = Math.min(points[0].y, points[1].y);\\n                              int w = Math.abs(points[0].x - points[1].x);\\n                              int h = Math.abs(points[0].y - points[1].y);"
+          )
+          screen_helpers = screen_helpers.replace(
+              "              final Point[] points = new Point[2];\\n              canvas.addMouseListener",
+              "              canvas.addMouseListener"
           )
 
           replace_once(
