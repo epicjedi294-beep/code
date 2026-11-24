@@ -1,0 +1,577 @@
+name: Improve pixel picker and found-target mouse movement
+
+on:
+  push:
+    paths:
+      - ".github/workflows/pixel-target-tools.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Update pixel picker and found-target movement
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          source_path = Path("KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java")
+          source = source_path.read_text(encoding="utf-8")
+
+          def replace_once(old, new, label):
+              global source
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              source = source.replace(old, new, 1)
+
+          def replace_section(start_marker, end_marker, replacement, label):
+              global source
+              start = source.find(start_marker)
+              if start < 0:
+                  raise SystemExit(f"{label}: start marker not found")
+              end = source.find(end_marker, start + len(start_marker))
+              if end < 0:
+                  raise SystemExit(f"{label}: end marker not found")
+              if source.find(start_marker, start + 1) >= 0:
+                  raise SystemExit(f"{label}: start marker is not unique")
+              source = source[:start] + replacement + source[end:]
+
+          # Move Mouse To automatically consumes the innermost successful Find Pixel /
+          # Look for Image result while it is inside that conditional. Users can force
+          # the typed/picked X/Y values with the explicit checkbox.
+          replace_once(
+              """            case MOVE_MOUSE, MOVE_MOUSE_REL -> {
+                  boolean relative = block.type == MacroBlockType.MOVE_MOUSE_REL;
+                  JSpinner xSpinner = new JSpinner(new SpinnerNumberModel(block.code, relative ? -10_000 : -20_000, relative ? 10_000 : 20_000, 1));
+                  JSpinner ySpinner = new JSpinner(new SpinnerNumberModel(block.milliseconds, relative ? -10_000 : -20_000, relative ? 10_000 : 20_000, 1));
+                  JPanel coordinates = new JPanel(new GridLayout(2, 2, 8, 6));
+                  coordinates.add(new JLabel(relative ? "Change X by:" : "Screen X:"));
+                  coordinates.add(xSpinner);
+                  coordinates.add(new JLabel(relative ? "Change Y by:" : "Screen Y:"));
+                  coordinates.add(ySpinner);
+                  JPanel panel = new JPanel(new BorderLayout(0, 8));
+                  panel.add(coordinates, BorderLayout.CENTER);
+                  if (!relative) {
+                      JButton pickPoint = new JButton("Pick coordinates from screen…");
+                      pickPoint.setToolTipText("Click the destination point on your desktop to fill X and Y.");
+                      pickPoint.addActionListener(event -> showScreenSelectionOverlay(
+                              "Click the point where the mouse should move · Esc cancels", false, picked -> {
+                                  xSpinner.setValue(picked.x);
+                                  ySpinner.setValue(picked.y);
+                                  statusLabel.setText("Picked screen position " + picked.x + "," + picked.y + ".");
+                              }));
+                      panel.add(pickPoint, BorderLayout.SOUTH);
+                  }
+                  String title = relative ? "Edit move mouse by" : "Edit move mouse to";
+                  if (JOptionPane.showConfirmDialog(this, panel, title, JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
+                      block.code = ((Number) xSpinner.getValue()).intValue();
+                      block.milliseconds = ((Number) ySpinner.getValue()).intValue();
+                      macroBlockList.repaint();
+                      persistBinds();
+                      statusLabel.setText("Updated " + block.description() + ".");
+                  }
+              }
+  """,
+              """            case MOVE_MOUSE, MOVE_MOUSE_REL -> {
+                  boolean relative = block.type == MacroBlockType.MOVE_MOUSE_REL;
+                  JSpinner xSpinner = new JSpinner(new SpinnerNumberModel(block.code, relative ? -10_000 : -20_000, relative ? 10_000 : 20_000, 1));
+                  JSpinner ySpinner = new JSpinner(new SpinnerNumberModel(block.milliseconds, relative ? -10_000 : -20_000, relative ? 10_000 : 20_000, 1));
+                  JPanel coordinates = new JPanel(new GridLayout(2, 2, 8, 6));
+                  coordinates.add(new JLabel(relative ? "Change X by:" : "Screen X:"));
+                  coordinates.add(xSpinner);
+                  coordinates.add(new JLabel(relative ? "Change Y by:" : "Screen Y:"));
+                  coordinates.add(ySpinner);
+                  JPanel panel = new JPanel(new BorderLayout(0, 8));
+                  panel.add(coordinates, BorderLayout.CENTER);
+                  if (!relative) {
+                      JButton pickPoint = new JButton("Pick coordinates from screen…");
+                      pickPoint.setToolTipText("Click any point on the desktop to fill X and Y.");
+                      pickPoint.addActionListener(event -> showScreenSelectionOverlay(
+                              "Click the destination point anywhere on screen · Esc cancels", false, picked -> {
+                                  xSpinner.setValue(picked.x);
+                                  ySpinner.setValue(picked.y);
+                                  statusLabel.setText("Picked screen position " + picked.x + "," + picked.y + ".");
+                              }));
+                      JCheckBox fixedCoordinates = new JCheckBox(
+                              "Always use these X/Y values inside Find Pixel / Look for Image",
+                              "fixed".equalsIgnoreCase(block.text));
+                      fixedCoordinates.setToolTipText("When unchecked, this block moves to the detected pixel/image while inside a successful Find block.");
+                      JPanel options = new JPanel();
+                      options.setLayout(new BoxLayout(options, BoxLayout.Y_AXIS));
+                      options.add(pickPoint);
+                      options.add(fixedCoordinates);
+                      panel.add(options, BorderLayout.SOUTH);
+                      String title = "Edit move mouse to";
+                      if (JOptionPane.showConfirmDialog(this, panel, title, JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
+                          block.code = ((Number) xSpinner.getValue()).intValue();
+                          block.milliseconds = ((Number) ySpinner.getValue()).intValue();
+                          block.text = fixedCoordinates.isSelected() ? "fixed" : "";
+                          macroBlockList.repaint();
+                          persistBinds();
+                          statusLabel.setText("Updated " + block.description() + ".");
+                      }
+                  } else {
+                      String title = "Edit move mouse by";
+                      if (JOptionPane.showConfirmDialog(this, panel, title, JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
+                          block.code = ((Number) xSpinner.getValue()).intValue();
+                          block.milliseconds = ((Number) ySpinner.getValue()).intValue();
+                          block.text = "";
+                          macroBlockList.repaint();
+                          persistBinds();
+                          statusLabel.setText("Updated " + block.description() + ".");
+                      }
+                  }
+              }
+  """,
+              "Add automatic detected-target movement option"
+          )
+
+          # Pixel configuration now uses the screen-selection overlay, not the position
+          # of the button in the Key Sequence Studio dialog. New pixel blocks search the
+          # whole virtual desktop by default; a drag picker can narrow the search region.
+          pixel_editor = r'''    private void editFindPixelBlock(MacroBlock block) {
+          JSpinner xSpinner = new JSpinner(new SpinnerNumberModel(block.searchX, -20_000, 20_000, 1));
+          JSpinner ySpinner = new JSpinner(new SpinnerNumberModel(block.searchY, -20_000, 20_000, 1));
+          JSpinner wSpinner = new JSpinner(new SpinnerNumberModel(Math.max(1, block.searchW), 1, 8_000, 1));
+          JSpinner hSpinner = new JSpinner(new SpinnerNumberModel(Math.max(1, block.searchH), 1, 8_000, 1));
+          int rgb = block.colorRgb & 0xFFFFFF;
+          JSpinner rSpinner = new JSpinner(new SpinnerNumberModel((rgb >> 16) & 0xFF, 0, 255, 1));
+          JSpinner gSpinner = new JSpinner(new SpinnerNumberModel((rgb >> 8) & 0xFF, 0, 255, 1));
+          JSpinner bSpinner = new JSpinner(new SpinnerNumberModel(rgb & 0xFF, 0, 255, 1));
+          JSpinner tolSpinner = new JSpinner(new SpinnerNumberModel(Math.max(0, Math.min(255, block.colorTolerance)), 0, 255, 1));
+
+          JPanel colorPreview = new JPanel();
+          colorPreview.setPreferredSize(new Dimension(48, 24));
+          colorPreview.setBorder(BorderFactory.createLineBorder(Color.DARK_GRAY));
+          Runnable updatePreview = () -> {
+              int r = ((Number) rSpinner.getValue()).intValue();
+              int g = ((Number) gSpinner.getValue()).intValue();
+              int b = ((Number) bSpinner.getValue()).intValue();
+              colorPreview.setBackground(new Color(r, g, b));
+              colorPreview.repaint();
+          };
+          updatePreview.run();
+          rSpinner.addChangeListener(e -> updatePreview.run());
+          gSpinner.addChangeListener(e -> updatePreview.run());
+          bSpinner.addChangeListener(e -> updatePreview.run());
+
+          JButton sampleButton = new JButton("Pick pixel from anywhere on screen…");
+          sampleButton.setToolTipText("Opens a full-desktop picker. Click the pixel you want to detect, even in another app or game.");
+          sampleButton.addActionListener(event -> showScreenSelectionOverlay(
+                  "Click the pixel to sample anywhere on your desktop · Esc cancels", false, picked -> {
+                      try {
+                          Color sampled = robot.getPixelColor(picked.x, picked.y);
+                          rSpinner.setValue(sampled.getRed());
+                          gSpinner.setValue(sampled.getGreen());
+                          bSpinner.setValue(sampled.getBlue());
+                          statusLabel.setText(String.format(Locale.ROOT,
+                                  "Sampled #%02X%02X%02X at %d,%d",
+                                  sampled.getRed(), sampled.getGreen(), sampled.getBlue(), picked.x, picked.y));
+                      } catch (Exception exception) {
+                          statusLabel.setText("Could not sample screen pixel: " + exception.getMessage());
+                      }
+                  }));
+
+          JButton pickRegionButton = new JButton("Drag to choose search area…");
+          pickRegionButton.setToolTipText("Drag around the part of the desktop to scan for the chosen color.");
+          JCheckBox entireScreenCheck = new JCheckBox("Search entire screen", "screen".equalsIgnoreCase(block.text));
+          Runnable updateRegionControls = () -> {
+              boolean regionEnabled = !entireScreenCheck.isSelected();
+              xSpinner.setEnabled(regionEnabled);
+              ySpinner.setEnabled(regionEnabled);
+              wSpinner.setEnabled(regionEnabled);
+              hSpinner.setEnabled(regionEnabled);
+          };
+          entireScreenCheck.addActionListener(event -> updateRegionControls.run());
+          pickRegionButton.addActionListener(event -> showScreenSelectionOverlay(
+                  "Drag a rectangle around the area to scan · Esc cancels", true, selected -> {
+                      xSpinner.setValue(selected.x);
+                      ySpinner.setValue(selected.y);
+                      wSpinner.setValue(Math.max(1, selected.width));
+                      hSpinner.setValue(Math.max(1, selected.height));
+                      entireScreenCheck.setSelected(false);
+                      updateRegionControls.run();
+                      statusLabel.setText("Pixel search area set to " + selected.x + "," + selected.y
+                              + " " + selected.width + "×" + selected.height + ".");
+                  }));
+          updateRegionControls.run();
+
+          JPanel region = new JPanel(new GridLayout(2, 4, 6, 4));
+          region.add(new JLabel("X:")); region.add(xSpinner);
+          region.add(new JLabel("Y:")); region.add(ySpinner);
+          region.add(new JLabel("Width:")); region.add(wSpinner);
+          region.add(new JLabel("Height:")); region.add(hSpinner);
+
+          JPanel colorRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+          colorRow.add(new JLabel("R:")); colorRow.add(rSpinner);
+          colorRow.add(new JLabel("G:")); colorRow.add(gSpinner);
+          colorRow.add(new JLabel("B:")); colorRow.add(bSpinner);
+          colorRow.add(colorPreview);
+
+          JPanel pickerRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+          pickerRow.add(sampleButton);
+          pickerRow.add(pickRegionButton);
+          pickerRow.add(entireScreenCheck);
+
+          JPanel tolRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+          tolRow.add(new JLabel("Color tolerance (per channel 0–255):"));
+          tolRow.add(tolSpinner);
+
+          JPanel content = new JPanel(new BorderLayout(0, 8));
+          content.add(new JLabel("<html><b>Find Pixel</b><br>Pick a color anywhere on the desktop, then choose the scan area. A successful match makes its screen position available to Move Mouse To blocks inside this conditional.</html>"), BorderLayout.NORTH);
+          JPanel center = new JPanel();
+          center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
+          center.add(region);
+          center.add(Box.createVerticalStrut(6));
+          center.add(pickerRow);
+          center.add(Box.createVerticalStrut(6));
+          center.add(colorRow);
+          center.add(Box.createVerticalStrut(4));
+          center.add(tolRow);
+          content.add(center, BorderLayout.CENTER);
+
+          if (JOptionPane.showConfirmDialog(this, content, "Edit If pixel found",
+                  JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
+              block.searchX = ((Number) xSpinner.getValue()).intValue();
+              block.searchY = ((Number) ySpinner.getValue()).intValue();
+              block.searchW = Math.max(1, ((Number) wSpinner.getValue()).intValue());
+              block.searchH = Math.max(1, ((Number) hSpinner.getValue()).intValue());
+              int r = ((Number) rSpinner.getValue()).intValue();
+              int g = ((Number) gSpinner.getValue()).intValue();
+              int b = ((Number) bSpinner.getValue()).intValue();
+              block.colorRgb = (r << 16) | (g << 8) | b;
+              block.colorTolerance = ((Number) tolSpinner.getValue()).intValue();
+              block.text = entireScreenCheck.isSelected() ? "screen" : "";
+              macroBlockList.repaint();
+              persistBinds();
+              statusLabel.setText("Updated " + block.description()
+                      + (entireScreenCheck.isSelected() ? " (entire screen)." : "."));
+          }
+      }
+
+  '''
+          replace_section(
+              "    private void editFindPixelBlock(MacroBlock block) {\n",
+              "    private void moveSelectedMacroBlock(int direction) {\n",
+              pixel_editor,
+              "Replace pixel editor with full-screen pixel and region pickers"
+          )
+
+          # New Find Pixel blocks search the entire virtual desktop. Existing blocks retain
+          # their saved region setting unless the user changes it in the editor.
+          replace_once(
+              """            block.colorTolerance = Math.max(0, Math.min(255, tolerance));
+              return block;
+          }
+  """,
+              """            block.colorTolerance = Math.max(0, Math.min(255, tolerance));
+              block.text = "screen";
+              return block;
+          }
+  """,
+              "Default new pixel blocks to whole-screen scanning"
+          )
+
+          # Scan the entire virtual screen when requested; otherwise use the picked rectangle.
+          replace_section(
+              "    /** Scans the region; returns the absolute screen Point of the first match, or null if none. */\n",
+              "\n\n/** Returns true when the saved visual reference",
+              r'''    /** Scans the selected region or the entire virtual desktop and returns the first matching pixel. */
+          private Point findPixelLocation(MacroBlock block) {
+              Rectangle rect;
+              if ("screen".equalsIgnoreCase(block.text)) {
+                  rect = virtualScreenBounds();
+              } else {
+                  int w = Math.max(1, Math.min(4000, block.searchW));
+                  int h = Math.max(1, Math.min(4000, block.searchH));
+                  rect = new Rectangle(block.searchX, block.searchY, w, h);
+              }
+              BufferedImage image;
+              try {
+                  image = robot.createScreenCapture(rect);
+              } catch (Exception exception) {
+                  throw new IllegalStateException("Screen capture failed for Find Pixel: " + exception.getMessage(), exception);
+              }
+              int target = block.colorRgb & 0xFFFFFF;
+              int targetRed = (target >> 16) & 0xFF;
+              int targetGreen = (target >> 8) & 0xFF;
+              int targetBlue = target & 0xFF;
+              int tolerance = Math.max(0, Math.min(255, block.colorTolerance));
+              for (int y = 0; y < image.getHeight(); y++) {
+                  if (Thread.currentThread().isInterrupted()) return null;
+                  for (int x = 0; x < image.getWidth(); x++) {
+                      int rgb = image.getRGB(x, y) & 0xFFFFFF;
+                      int red = (rgb >> 16) & 0xFF;
+                      int green = (rgb >> 8) & 0xFF;
+                      int blue = rgb & 0xFF;
+                      if (Math.abs(red - targetRed) <= tolerance
+                              && Math.abs(green - targetGreen) <= tolerance
+                              && Math.abs(blue - targetBlue) <= tolerance) {
+                          return new Point(rect.x + x, rect.y + y);
+                      }
+                  }
+              }
+              return null;
+          }
+  ''',
+              "Update Find Pixel to scan full desktop or selected region"
+          )
+
+          # Find Image now returns the center point of its visual match so the same
+          # Move Mouse To behavior works for either kind of detector.
+          replace_section(
+              "/** Returns true when the saved visual reference is found on any attached desktop display. */\n",
+              "\n\nprivate static boolean similarColor",
+              r'''/** Returns the center point of a saved visual reference, or null when it is not visible. */
+          private Point findImageLocation(MacroBlock block) {
+              if (block.text == null || block.text.isBlank()) {
+                  throw new IllegalStateException("Capture a visual reference in the Look for image block first.");
+              }
+              try {
+                  Path referencePath = Path.of(block.text);
+                  if (!Files.isRegularFile(referencePath)) {
+                      throw new IOException("Visual reference file is missing: " + referencePath.getFileName());
+                  }
+                  BufferedImage reference = ImageIO.read(referencePath.toFile());
+                  if (reference == null) throw new IOException("The visual reference is not a readable image.");
+                  Rectangle bounds = virtualScreenBounds();
+                  BufferedImage screen = robot.createScreenCapture(bounds);
+                  int width = reference.getWidth();
+                  int height = reference.getHeight();
+                  if (width < 5 || height < 5 || width > screen.getWidth() || height > screen.getHeight()) return null;
+
+                  int centerX = width / 2;
+                  int centerY = height / 2;
+                  int anchor = reference.getRGB(centerX, centerY);
+                  final int tolerance = 42;
+                  for (int y = 0; y <= screen.getHeight() - height; y += 2) {
+                      if (Thread.currentThread().isInterrupted()) return null;
+                      for (int x = 0; x <= screen.getWidth() - width; x += 2) {
+                          if (!similarColor(screen.getRGB(x + centerX, y + centerY), anchor, tolerance)) continue;
+                          boolean matches = true;
+                          for (int gy = 0; gy <= 4 && matches; gy++) {
+                              int sampleY = (height - 1) * gy / 4;
+                              for (int gx = 0; gx <= 4; gx++) {
+                                  int sampleX = (width - 1) * gx / 4;
+                                  if (!similarColor(screen.getRGB(x + sampleX, y + sampleY),
+                                          reference.getRGB(sampleX, sampleY), tolerance)) {
+                                      matches = false;
+                                      break;
+                                  }
+                              }
+                          }
+                          if (matches) return new Point(bounds.x + x + centerX, bounds.y + y + centerY);
+                      }
+                  }
+                  return null;
+              } catch (IOException exception) {
+                  throw new IllegalStateException("Could not scan for the saved visual reference: " + exception.getMessage(), exception);
+              }
+          }
+  ''',
+              "Return matched location from Look for Image"
+          )
+
+          replace_once(
+              "            boolean stopMacro = false;\n            int executedBlocks = 0;\n",
+              "            boolean stopMacro = false;\n            int executedBlocks = 0;\n",
+              "Confirm run state anchor"
+          )
+          replace_once(
+              "                Deque<MacroLoopFrame> loopStack = new ArrayDeque<>();\n",
+              "                Deque<MacroLoopFrame> loopStack = new ArrayDeque<>();\n"
+              "                Deque<Point> findTargetStack = new ArrayDeque<>();\n",
+              "Track detected point through nested Find blocks"
+          )
+
+          replace_once(
+              """                        case MOVE_MOUSE -> {
+                              int x = resolveMacroNumber(block, block.code);
+                              int y = resolveMacroNumber(block, block.milliseconds);
+                              logMacro("Move mouse to " + x + "," + y);
+                              robot.mouseMove(x, y);
+                              pc++;
+                          }
+  """,
+              """                        case MOVE_MOUSE -> {
+                              Point detectedPoint = (!"fixed".equalsIgnoreCase(block.text) && !findTargetStack.isEmpty())
+                                      ? findTargetStack.peek() : null;
+                              if (detectedPoint != null) {
+                                  robot.mouseMove(detectedPoint.x, detectedPoint.y);
+                                  logMacro("Move mouse to detected point " + detectedPoint.x + "," + detectedPoint.y
+                                          + " (X/Y values bypassed inside Find block)");
+                              } else {
+                                  int x = resolveMacroNumber(block, block.code);
+                                  int y = resolveMacroNumber(block, block.milliseconds);
+                                  robot.mouseMove(x, y);
+                                  logMacro("Move mouse to fixed coordinates " + x + "," + y);
+                              }
+                              pc++;
+                          }
+  """,
+              "Use found point for Move Mouse To inside detection block"
+          )
+
+          replace_once(
+              """                        case FIND_PIXEL -> {
+                              Point found = findPixelLocation(block);
+                              if (found != null) {
+                                  logMacro(String.format(Locale.ROOT, "Pixel found (%d,%d)  #%06X  region %d,%d %dx%d",
+                                          found.x, found.y, block.colorRgb & 0xFFFFFF,
+                                          block.searchX, block.searchY, block.searchW, block.searchH));
+                                  pc++; // enter the body
+                              } else {
+                                  logMacro(String.format(Locale.ROOT, "Pixel not found  #%06X  region %d,%d %dx%d  → skip body",
+                                          block.colorRgb & 0xFFFFFF,
+                                          block.searchX, block.searchY, block.searchW, block.searchH));
+                                  pc = skipToMatchingEndIf(blocks, pc);
+                              }
+                          }
+                          case FIND_IMAGE -> {
+                              boolean found = findImageVisible(block);
+                              if (found) {
+                                  logMacro("Look for image: visual reference found → run enclosed blocks");
+                                  pc++;
+                              } else {
+                                  logMacro("Look for image: reference not found → skip enclosed blocks");
+                                  pc = skipToMatchingEndIf(blocks, pc);
+                              }
+                          }
+                          case END_IF -> {
+                              logMacro("End if");
+                              pc++;
+                          }
+  """,
+              """                        case FIND_PIXEL -> {
+                              Point found = findPixelLocation(block);
+                              if (found != null) {
+                                  findTargetStack.push(found);
+                                  String searchDescription = "screen".equalsIgnoreCase(block.text)
+                                          ? "entire desktop" : block.searchX + "," + block.searchY + " " + block.searchW + "x" + block.searchH;
+                                  logMacro(String.format(Locale.ROOT, "Pixel found at (%d,%d)  #%06X  search %s",
+                                          found.x, found.y, block.colorRgb & 0xFFFFFF, searchDescription));
+                                  pc++;
+                              } else {
+                                  logMacro(String.format(Locale.ROOT, "Pixel not found  #%06X  → skip enclosed blocks",
+                                          block.colorRgb & 0xFFFFFF));
+                                  pc = skipToMatchingEndIf(blocks, pc);
+                              }
+                          }
+                          case FIND_IMAGE -> {
+                              Point found = findImageLocation(block);
+                              if (found != null) {
+                                  findTargetStack.push(found);
+                                  logMacro("Look for image: found at " + found.x + "," + found.y + " → run enclosed blocks");
+                                  pc++;
+                              } else {
+                                  logMacro("Look for image: reference not found → skip enclosed blocks");
+                                  pc = skipToMatchingEndIf(blocks, pc);
+                              }
+                          }
+                          case END_IF -> {
+                              if (!findTargetStack.isEmpty()) findTargetStack.pop();
+                              logMacro("End if");
+                              pc++;
+                          }
+  """,
+              "Carry detected pixel/image position into conditional body"
+          )
+
+          # Update summaries so the workspace says when a Find Pixel block scans the whole screen.
+          replace_once(
+              """                case FIND_PIXEL -> String.format(Locale.ROOT,
+                          "If #%06X found in %d,%d %dx%d (±%d)",
+                          colorRgb & 0xFFFFFF, searchX, searchY, searchW, searchH);
+  """,
+              """                case FIND_PIXEL -> String.format(Locale.ROOT,
+                          "If #%06X found %s (±%d)",
+                          colorRgb & 0xFFFFFF,
+                          "screen".equalsIgnoreCase(text) ? "anywhere on screen" : "in " + searchX + "," + searchY + " " + searchW + "x" + searchH,
+                          colorTolerance);
+  """,
+              "Update Find Pixel block description"
+          )
+
+          replace_once(
+              '        private static MacroBlock findImage() { return new MacroBlock(MacroBlockType.FIND_IMAGE, 0, 0, ""); }\n',
+              '        private static MacroBlock findImage() { return new MacroBlock(MacroBlockType.FIND_IMAGE, 0, 0, ""); }\n',
+              "Retain image factory"
+          )
+
+          source_path.write_text(source, encoding="utf-8")
+
+          build_path = Path("KeySequenceStudio_Simple/build.gradle")
+          build = build_path.read_text(encoding="utf-8")
+          if "version = '1.4.8'" not in build:
+              raise SystemExit("Expected v1.4.8 as the current project version.")
+          build_path.write_text(build.replace("version = '1.4.8'", "version = '1.4.9'", 1), encoding="utf-8")
+          print("Updated v1.4.9: full-screen pixel picker/search, region picker, found-point propagation to Move Mouse To, fixed-coordinate override.")
+          PY
+
+      - name: Compile against actual JNativeHook
+        run: |
+          curl --fail --silent --show-error --location \
+            https://repo.maven.apache.org/maven2/com/github/kwhat/jnativehook/2.2.2/jnativehook-2.2.2.jar \
+            --output "$RUNNER_TEMP/jnativehook-2.2.2.jar"
+          mkdir -p "$RUNNER_TEMP/kss-classes"
+          javac --release 17 -encoding UTF-8 \
+            -classpath "$RUNNER_TEMP/jnativehook-2.2.2.jar" \
+            -d "$RUNNER_TEMP/kss-classes" \
+            KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java
+
+      - name: Verify pixel picker and target propagation
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          s = Path("KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java").read_text(encoding="utf-8")
+          required = [
+              'Pick pixel from anywhere on screen',
+              'Drag to choose search area',
+              'Search entire screen',
+              'showScreenSelectionOverlay',
+              'block.text = "screen"',
+              'virtualScreenBounds()',
+              'Deque<Point> findTargetStack',
+              'findTargetStack.push(found)',
+              'findTargetStack.peek()',
+              '"fixed".equalsIgnoreCase(block.text)',
+              'findImageLocation(block)',
+              'robot.mouseMove(detectedPoint.x, detectedPoint.y)',
+          ]
+          missing = [item for item in required if item not in s]
+          if missing:
+              raise SystemExit("Missing expected behavior: " + ", ".join(missing))
+          if 'private boolean findImageVisible' in s:
+              raise SystemExit("Old boolean-only image scan remains.")
+          if "FILE_VERSION = 15" not in s:
+              raise SystemExit("Existing save-file version should remain compatible.")
+          print("Full-screen pixel picker, area selection, pixel/image location propagation, and fixed coordinate override checks passed.")
+          PY
+
+      - name: Package v1.4.9
+        run: |
+          zip -qr KeySequenceStudio_1.4.9_FullScreenPixelTargets.zip KeySequenceStudio_Simple
+          unzip -t KeySequenceStudio_1.4.9_FullScreenPixelTargets.zip
+
+      - name: Commit updated project and ZIP
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add KeySequenceStudio_Simple
+          git add KeySequenceStudio_1.4.9_FullScreenPixelTargets.zip
+          git commit -m "Add full-screen pixel targeting and detected point movement"
+          git push
