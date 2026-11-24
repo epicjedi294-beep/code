@@ -372,15 +372,9 @@ jobs:
               "Track detected point through nested Find blocks"
           )
 
-          replace_once(
-              """                        case MOVE_MOUSE -> {
-                              int x = resolveMacroNumber(block, block.code);
-                              int y = resolveMacroNumber(block, block.milliseconds);
-                              logMacro("Move mouse to " + x + "," + y);
-                              robot.mouseMove(x, y);
-                              pc++;
-                          }
-          """,
+          replace_section(
+              "                        case MOVE_MOUSE -> {\n",
+              "                        case MOVE_MOUSE_REL -> {\n",
               """                        case MOVE_MOUSE -> {
                               Point detectedPoint = (!"fixed".equalsIgnoreCase(block.text) && !findTargetStack.isEmpty())
                                       ? findTargetStack.peek() : null;
@@ -396,40 +390,13 @@ jobs:
                               }
                               pc++;
                           }
-          """,
+  """,
               "Use found point for Move Mouse To inside detection block"
           )
 
-          replace_once(
-              """                        case FIND_PIXEL -> {
-                              Point found = findPixelLocation(block);
-                              if (found != null) {
-                                  logMacro(String.format(Locale.ROOT, "Pixel found (%d,%d)  #%06X  region %d,%d %dx%d",
-                                          found.x, found.y, block.colorRgb & 0xFFFFFF,
-                                          block.searchX, block.searchY, block.searchW, block.searchH));
-                                  pc++; // enter the body
-                              } else {
-                                  logMacro(String.format(Locale.ROOT, "Pixel not found  #%06X  region %d,%d %dx%d  → skip body",
-                                          block.colorRgb & 0xFFFFFF,
-                                          block.searchX, block.searchY, block.searchW, block.searchH));
-                                  pc = skipToMatchingEndIf(blocks, pc);
-                              }
-                          }
-                          case FIND_IMAGE -> {
-                              boolean found = findImageVisible(block);
-                              if (found) {
-                                  logMacro("Look for image: visual reference found → run enclosed blocks");
-                                  pc++;
-                              } else {
-                                  logMacro("Look for image: reference not found → skip enclosed blocks");
-                                  pc = skipToMatchingEndIf(blocks, pc);
-                              }
-                          }
-                          case END_IF -> {
-                              logMacro("End if");
-                              pc++;
-                          }
-          """,
+          replace_section(
+              "                        case FIND_PIXEL -> {\n",
+              "                        case END_IF -> {\n",
               """                        case FIND_PIXEL -> {
                               Point found = findPixelLocation(block);
                               if (found != null) {
@@ -456,13 +423,20 @@ jobs:
                                   pc = skipToMatchingEndIf(blocks, pc);
                               }
                           }
-                          case END_IF -> {
+  """,
+              "Carry detected pixel/image position into conditional body"
+          )
+
+          replace_section(
+              "                        case END_IF -> {\n",
+              "                    }\n                    if (stopMacro) break;",
+              """                        case END_IF -> {
                               if (!findTargetStack.isEmpty()) findTargetStack.pop();
                               logMacro("End if");
                               pc++;
                           }
-          """,
-              "Carry detected pixel/image position into conditional body"
+  """,
+              "Restore previous detected point when leaving Find block"
           )
 
           # Update summaries so the workspace says when a Find Pixel block scans the whole screen.
