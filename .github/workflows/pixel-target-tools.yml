@@ -261,7 +261,7 @@ jobs:
               statusLabel.setText("Updated " + block.description()
                       + (entireScreenCheck.isSelected() ? " (entire screen)." : "."));
           }
-      }
+          }
 
           '''
           replace_section(
