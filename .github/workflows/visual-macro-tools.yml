@@ -354,7 +354,7 @@ jobs:
           }
           '''
           # Remove the placeholder listener from the helper template.
-          screen_helpers = screen_helpers.replace("                      ((PointAccess) null);\\n", "")
+          screen_helpers = screen_helpers.replace("((PointAccess) null);", "/* picker placeholder removed */")
           # Keep drag-selection feedback visible while the screen reference is being selected.
           screen_helpers = screen_helpers.replace(
               "              JComponent canvas = new JComponent() {",
