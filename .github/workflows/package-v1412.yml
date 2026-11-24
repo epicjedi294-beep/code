@@ -3,11 +3,8 @@ name: Package Key Sequence Studio 1.4.12
 on:
   push:
     paths:
-      - "KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java"
-      - "KeySequenceStudio_Simple/build.gradle"
       - ".github/workflows/package-v1412.yml"
   workflow_dispatch:
-
 permissions:
   contents: write
 
