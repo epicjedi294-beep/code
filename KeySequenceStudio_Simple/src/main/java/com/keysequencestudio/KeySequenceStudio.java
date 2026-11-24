@@ -2796,10 +2796,10 @@ private void showScreenSelectionOverlay(String instruction, boolean dragToSelect
                 g.setFont(new Font("Segoe UI", Font.BOLD, 14));
                 g.drawString(instruction, 27, 40);
                 if (selectionPoints[0] != null && selectionPoints[1] != null && dragToSelect) {
-                    int x = Math.min(anchor.x, current.x);
-                    int y = Math.min(anchor.y, current.y);
-                    int w = Math.abs(anchor.x - current.x);
-                    int h = Math.abs(anchor.y - current.y);
+                    int x = Math.min(selectionPoints[0].x, selectionPoints[1].x);
+                    int y = Math.min(selectionPoints[0].y, selectionPoints[1].y);
+                    int w = Math.abs(selectionPoints[0].x - selectionPoints[1].x);
+                    int h = Math.abs(selectionPoints[0].y - selectionPoints[1].y);
                     g.setColor(new Color(55, 170, 255, 55));
                     g.fillRect(x, y, w, h);
                     g.setColor(new Color(25, 120, 220));
@@ -2816,23 +2816,23 @@ private void showScreenSelectionOverlay(String instruction, boolean dragToSelect
     canvas.addMouseListener(new java.awt.event.MouseAdapter() {
         @Override
         public void mousePressed(java.awt.event.MouseEvent event) {
-            points[0] = event.getPoint();
-            points[1] = event.getPoint();
+            selectionPoints[0] = event.getPoint();
+            selectionPoints[1] = event.getPoint();
             canvas.repaint();
         }
 
         @Override
         public void mouseReleased(java.awt.event.MouseEvent event) {
-            if (points[0] == null) return;
-            points[1] = event.getPoint();
+            if (selectionPoints[0] == null) return;
+            selectionPoints[1] = event.getPoint();
             Rectangle local = new Rectangle(
-                    Math.min(points[0].x, points[1].x),
-                    Math.min(points[0].y, points[1].y),
-                    Math.max(1, Math.abs(points[0].x - points[1].x)),
-                    Math.max(1, Math.abs(points[0].y - points[1].y)));
+                    Math.min(selectionPoints[0].x, selectionPoints[1].x),
+                    Math.min(selectionPoints[0].y, selectionPoints[1].y),
+                    Math.max(1, Math.abs(selectionPoints[0].x - selectionPoints[1].x)),
+                    Math.max(1, Math.abs(selectionPoints[0].y - selectionPoints[1].y)));
             if (dragToSelect && (local.width < 5 || local.height < 5)) {
-                points[0] = null;
-                points[1] = null;
+                selectionPoints[0] = null;
+                selectionPoints[1] = null;
                 canvas.repaint();
                 statusLabel.setText("Drag a rectangle at least 5 × 5 pixels around the item.");
                 return;
@@ -2849,14 +2849,14 @@ private void showScreenSelectionOverlay(String instruction, boolean dragToSelect
     canvas.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
         @Override
         public void mouseDragged(java.awt.event.MouseEvent event) {
-            points[1] = event.getPoint();
+            selectionPoints[1] = event.getPoint();
             canvas.repaint();
         }
 
         @Override
         public void mouseMoved(java.awt.event.MouseEvent event) {
-            if (points[0] != null) {
-                points[1] = event.getPoint();
+            if (selectionPoints[0] != null) {
+                selectionPoints[1] = event.getPoint();
                 canvas.repaint();
             }
         }
