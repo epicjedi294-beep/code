@@ -53,39 +53,9 @@ jobs:
           # Move Mouse To automatically consumes the innermost successful Find Pixel /
           # Look for Image result while it is inside that conditional. Users can force
           # the typed/picked X/Y values with the explicit checkbox.
-          replace_once(
-              """            case MOVE_MOUSE, MOVE_MOUSE_REL -> {
-                  boolean relative = block.type == MacroBlockType.MOVE_MOUSE_REL;
-                  JSpinner xSpinner = new JSpinner(new SpinnerNumberModel(block.code, relative ? -10_000 : -20_000, relative ? 10_000 : 20_000, 1));
-                  JSpinner ySpinner = new JSpinner(new SpinnerNumberModel(block.milliseconds, relative ? -10_000 : -20_000, relative ? 10_000 : 20_000, 1));
-                  JPanel coordinates = new JPanel(new GridLayout(2, 2, 8, 6));
-                  coordinates.add(new JLabel(relative ? "Change X by:" : "Screen X:"));
-                  coordinates.add(xSpinner);
-                  coordinates.add(new JLabel(relative ? "Change Y by:" : "Screen Y:"));
-                  coordinates.add(ySpinner);
-                  JPanel panel = new JPanel(new BorderLayout(0, 8));
-                  panel.add(coordinates, BorderLayout.CENTER);
-                  if (!relative) {
-                      JButton pickPoint = new JButton("Pick coordinates from screen…");
-                      pickPoint.setToolTipText("Click the destination point on your desktop to fill X and Y.");
-                      pickPoint.addActionListener(event -> showScreenSelectionOverlay(
-                              "Click the point where the mouse should move · Esc cancels", false, picked -> {
-                                  xSpinner.setValue(picked.x);
-                                  ySpinner.setValue(picked.y);
-                                  statusLabel.setText("Picked screen position " + picked.x + "," + picked.y + ".");
-                              }));
-                      panel.add(pickPoint, BorderLayout.SOUTH);
-                  }
-                  String title = relative ? "Edit move mouse by" : "Edit move mouse to";
-                  if (JOptionPane.showConfirmDialog(this, panel, title, JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
-                      block.code = ((Number) xSpinner.getValue()).intValue();
-                      block.milliseconds = ((Number) ySpinner.getValue()).intValue();
-                      macroBlockList.repaint();
-                      persistBinds();
-                      statusLabel.setText("Updated " + block.description() + ".");
-                  }
-              }
-          """,
+          replace_section(
+              "            case MOVE_MOUSE, MOVE_MOUSE_REL -> {\n",
+              "            case FIND_PIXEL -> editFindPixelBlock(block);\n",
               """            case MOVE_MOUSE, MOVE_MOUSE_REL -> {
                   boolean relative = block.type == MacroBlockType.MOVE_MOUSE_REL;
                   JSpinner xSpinner = new JSpinner(new SpinnerNumberModel(block.code, relative ? -10_000 : -20_000, relative ? 10_000 : 20_000, 1));
@@ -136,7 +106,7 @@ jobs:
                       }
                   }
               }
-          """,
+  """,
               "Add automatic detected-target movement option"
           )
 
