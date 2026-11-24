@@ -327,7 +327,7 @@ jobs:
               }
               return null;
           }
-  ''',
+          ''',
               "Update Find Pixel to scan full desktop or selected region"
           )
 
@@ -382,7 +382,7 @@ jobs:
                   throw new IllegalStateException("Could not scan for the saved visual reference: " + exception.getMessage(), exception);
               }
           }
-  ''',
+          ''',
               "Return matched location from Look for Image"
           )
 
