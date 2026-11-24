@@ -1,0 +1,82 @@
+name: Package Key Sequence Studio 1.4.13
+
+on:
+  push:
+    paths:
+      - "KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java"
+      - "KeySequenceStudio_Simple/build.gradle"
+      - ".github/workflows/package-v1413.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Compile against actual JNativeHook
+        run: |
+          curl --fail --silent --show-error --location \
+            https://repo.maven.apache.org/maven2/com/github/kwhat/jnativehook/2.2.2/jnativehook-2.2.2.jar \
+            --output "$RUNNER_TEMP/jnativehook-2.2.2.jar"
+          mkdir -p "$RUNNER_TEMP/kss-classes"
+          javac --release 17 -encoding UTF-8 \
+            -classpath "$RUNNER_TEMP/jnativehook-2.2.2.jar" \
+            -d "$RUNNER_TEMP/kss-classes" \
+            KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java
+
+      - name: Verify visible picker and unlimited image reference capture
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          source = Path("KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java").read_text(encoding="utf-8")
+          gradle = Path("KeySequenceStudio_Simple/build.gradle").read_text(encoding="utf-8")
+          required = [
+              "implements NativeKeyListener, NativeMouseListener, NativeMouseMotionListener, NativeMouseWheelListener",
+              "GlobalScreen.addNativeMouseMotionListener(this);",
+              "handleScreenSelectionMouseDragged(selection, event.getX(), event.getY());",
+              "request.dragCurrent = point;",
+              "request.overlay.getContentPane().repaint();",
+              "g.fillRect(x, y, width, height);",
+              "g.setStroke(new BasicStroke(4f));",
+              "boolean addClosingIf = type == MacroBlockType.FIND_PIXEL || type == MacroBlockType.FIND_IMAGE;",
+              "findMatchingEndIf(macro.blocks, index)",
+              "findMatchingStartIf(macro.blocks, index)",
+              "int[] sampledScreenPoint = {block.code, block.milliseconds};",
+              "final int requiredMatches = 20",
+              "FILE_VERSION = 15",
+              "There is no fixed 256 × 256 pixel limit.",
+          ]
+          missing = [item for item in required if item not in source]
+          if missing:
+              raise SystemExit("Missing required behavior: " + ", ".join(missing))
+          if "selected.width > 256" in source or "selected.height > 256" in source:
+              raise SystemExit("The old 256-pixel image capture cap is still present.")
+          if "version = '1.4.13'" not in gradle:
+              raise SystemExit("Project version is not 1.4.13.")
+          print("Global live drag outline, paired conditionals, pixel sampling and uncapped image capture checks passed.")
+          PY
+
+      - name: Package v1.4.13 project ZIP
+        run: |
+          zip -qr KeySequenceStudio_1.4.13_VisiblePicker.zip KeySequenceStudio_Simple
+          unzip -t KeySequenceStudio_1.4.13_VisiblePicker.zip
+          sha256sum KeySequenceStudio_1.4.13_VisiblePicker.zip
+
+      - name: Commit updated ZIP
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add KeySequenceStudio_1.4.13_VisiblePicker.zip
+          git commit -m "Package Key Sequence Studio 1.4.13"
+          git push
