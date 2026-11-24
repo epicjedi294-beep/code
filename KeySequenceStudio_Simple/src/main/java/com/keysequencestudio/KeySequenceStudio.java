@@ -2779,10 +2779,9 @@ private void showScreenSelectionOverlay(String instruction, boolean dragToSelect
     overlay.setFocusableWindowState(true);
     overlay.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
 
+    final Point[] selectionPoints = new Point[2];
     JComponent canvas = new JComponent() {
         private static final long serialVersionUID = 1L;
-        private Point anchor;
-        private Point current;
 
         @Override
         protected void paintComponent(Graphics graphics) {
@@ -2796,7 +2795,7 @@ private void showScreenSelectionOverlay(String instruction, boolean dragToSelect
                 g.setColor(Color.WHITE);
                 g.setFont(new Font("Segoe UI", Font.BOLD, 14));
                 g.drawString(instruction, 27, 40);
-                if (anchor != null && current != null && dragToSelect) {
+                if (selectionPoints[0] != null && selectionPoints[1] != null && dragToSelect) {
                     int x = Math.min(anchor.x, current.x);
                     int y = Math.min(anchor.y, current.y);
                     int w = Math.abs(anchor.x - current.x);
@@ -2813,15 +2812,7 @@ private void showScreenSelectionOverlay(String instruction, boolean dragToSelect
         }
     };
     canvas.setFocusable(true);
-    canvas.addMouseListener(new java.awt.event.MouseAdapter() {
-        @Override
-        public void mousePressed(java.awt.event.MouseEvent event) {
-            /* picker placeholder removed */
-        }
-    });
-    // Mouse handling is installed below using a small state holder so the picker
-    // can safely keep its selection local to this overlay.
-    final Point[] points = new Point[2];
+    // Keep the current drag rectangle visible while selecting a reference image.
     canvas.addMouseListener(new java.awt.event.MouseAdapter() {
         @Override
         public void mousePressed(java.awt.event.MouseEvent event) {
