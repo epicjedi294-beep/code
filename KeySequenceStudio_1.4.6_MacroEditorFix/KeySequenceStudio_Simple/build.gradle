@@ -1,0 +1,109 @@
+plugins {
+    id 'application'
+}
+
+group = 'com.keysequencestudio'
+version = '1.4.6'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Global keyboard and mouse-button triggers.
+    implementation 'com.github.kwhat:jnativehook:2.2.2'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+application {
+    applicationName = 'KeySequenceStudio'
+    mainClass = 'com.keysequencestudio.KeySequenceStudio'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+    options.encoding = 'UTF-8'
+}
+
+// Build a Windows setup installer that bundles the runtime and all dependencies.
+// Run this task on Windows with a full JDK and WiX Toolset installed.
+tasks.register('packageWindowsInstaller', Exec) {
+    group = 'distribution'
+    description = 'Build a self-contained Windows KeySequenceStudio-Setup.exe installer.'
+    dependsOn tasks.named('installDist')
+
+    def isWindowsHost = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows')
+    def javaHomeDir = new File(System.getProperty('java.home'))
+    def jpackageExe = new File(new File(javaHomeDir, 'bin'), isWindowsHost ? 'jpackage.exe' : 'jpackage')
+    def inputDir = layout.buildDirectory.dir('install/KeySequenceStudio/lib').get().asFile
+    def outputDir = layout.buildDirectory.dir('installer').get().asFile
+    def iconFile = file('src/main/resources/KeySequenceStudio.ico')
+
+    doFirst {
+        if (!isWindowsHost) {
+            throw new GradleException('The Windows installer must be built on Windows. Open this project on your Windows PC and run this task there.')
+        }
+        if (!jpackageExe.isFile()) {
+            throw new GradleException("jpackage.exe was not found under ${javaHomeDir}. Set the Gradle JVM to an installed JDK (not a JRE).")
+        }
+        if (!iconFile.isFile()) {
+            throw new GradleException("App icon is missing: ${iconFile}")
+        }
+        delete(outputDir)
+        outputDir.mkdirs()
+    }
+
+    executable jpackageExe.absolutePath
+    args '--type', 'exe',
+            '--input', inputDir.absolutePath,
+            '--dest', outputDir.absolutePath,
+            '--name', 'KeySequenceStudio',
+            '--app-version', project.version.toString(),
+            '--vendor', 'Key Sequence Studio',
+            '--description', 'Create keyboard and mouse sequences, hold actions, macros, and run notifications.',
+            '--main-jar', "KeySequenceStudio-${project.version}.jar",
+            '--main-class', 'com.keysequencestudio.KeySequenceStudio',
+            '--icon', iconFile.absolutePath,
+            '--win-menu',
+            '--win-menu-group', 'Key Sequence Studio',
+            '--win-shortcut',
+            '--win-per-user-install',
+            '--win-dir-chooser'
+}
+
+// Optional portable Windows folder (contains KeySequenceStudio.exe, but is not an installer).
+tasks.register('packageWindowsPortable', Exec) {
+    group = 'distribution'
+    description = 'Build a portable Windows app folder with a bundled runtime.'
+    dependsOn tasks.named('installDist')
+
+    def isWindowsHost = System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows')
+    def javaHomeDir = new File(System.getProperty('java.home'))
+    def jpackageExe = new File(new File(javaHomeDir, 'bin'), isWindowsHost ? 'jpackage.exe' : 'jpackage')
+    def inputDir = layout.buildDirectory.dir('install/KeySequenceStudio/lib').get().asFile
+    def outputDir = layout.buildDirectory.dir('portable').get().asFile
+    def iconFile = file('src/main/resources/KeySequenceStudio.ico')
+
+    doFirst {
+        if (!isWindowsHost) throw new GradleException('Build the Windows portable app on Windows.')
+        if (!jpackageExe.isFile()) throw new GradleException("jpackage.exe was not found under ${javaHomeDir}.")
+        delete(outputDir)
+        outputDir.mkdirs()
+    }
+
+    executable jpackageExe.absolutePath
+    args '--type', 'app-image',
+            '--input', inputDir.absolutePath,
+            '--dest', outputDir.absolutePath,
+            '--name', 'KeySequenceStudio',
+            '--app-version', project.version.toString(),
+            '--vendor', 'Key Sequence Studio',
+            '--description', 'Create keyboard and mouse sequences, hold actions, macros, and run notifications.',
+            '--main-jar', "KeySequenceStudio-${project.version}.jar",
+            '--main-class', 'com.keysequencestudio.KeySequenceStudio',
+            '--icon', iconFile.absolutePath
+}
