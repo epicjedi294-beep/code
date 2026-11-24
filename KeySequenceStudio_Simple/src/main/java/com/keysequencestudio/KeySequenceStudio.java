@@ -6,6 +6,7 @@ import com.github.kwhat.jnativehook.keyboard.NativeKeyEvent;
 import com.github.kwhat.jnativehook.keyboard.NativeKeyListener;
 import com.github.kwhat.jnativehook.mouse.NativeMouseEvent;
 import com.github.kwhat.jnativehook.mouse.NativeMouseListener;
+import com.github.kwhat.jnativehook.mouse.NativeMouseMotionListener;
 import com.github.kwhat.jnativehook.mouse.NativeMouseWheelEvent;
 import com.github.kwhat.jnativehook.mouse.NativeMouseWheelListener;
 
@@ -59,7 +60,7 @@ import java.util.logging.Logger;
  * Global listeners compare keyboard and mouse-button presses against configured triggers.
  * Sequence actions are sent locally with java.awt.Robot.
  */
-public final class KeySequenceStudio extends JFrame implements NativeKeyListener, NativeMouseListener, NativeMouseWheelListener {
+public final class KeySequenceStudio extends JFrame implements NativeKeyListener, NativeMouseListener, NativeMouseMotionListener, NativeMouseWheelListener {
     private static final long serialVersionUID = 1L;
     private static final int FILE_VERSION = 15; // Adds If pixel found / End if conditional blocks.
     // Default duration for newly-added key and mouse press steps. Each step can
@@ -1549,6 +1550,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
             GlobalScreen.registerNativeHook();
             GlobalScreen.addNativeKeyListener(this);
             GlobalScreen.addNativeMouseListener(this);
+            GlobalScreen.addNativeMouseMotionListener(this);
             // Wheel rotation is a different native event from a physical button press.
             // Listen only so capture mode can explain that scrolling is intentionally ignored.
             GlobalScreen.addNativeMouseWheelListener(this);
@@ -2804,6 +2806,8 @@ private void showScreenSelectionOverlay(String instruction, boolean dragToSelect
     overlay.setAlwaysOnTop(true);
     overlay.setFocusableWindowState(true);
     overlay.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+    ScreenSelectionRequest request = new ScreenSelectionRequest(
+            overlay, desktopBounds, dragToSelect, onSelection);
 
     JComponent canvas = new JComponent() {
         private static final long serialVersionUID = 1L;
@@ -2814,6 +2818,36 @@ private void showScreenSelectionOverlay(String instruction, boolean dragToSelect
                 g.drawImage(desktopImage, 0, 0, null);
                 g.setColor(new Color(12, 18, 28, 72));
                 g.fillRect(0, 0, getWidth(), getHeight());
+
+                // Paint the live drag rectangle above the dimmed screenshot so it is
+                // visible even when dragging over bright or dark windows.
+                Point start = request.dragStart;
+                Point current = request.dragCurrent;
+                if (dragToSelect && start != null && current != null) {
+                    int x = Math.min(start.x, current.x) - desktopBounds.x;
+                    int y = Math.min(start.y, current.y) - desktopBounds.y;
+                    int width = Math.abs(start.x - current.x) + 1;
+                    int height = Math.abs(start.y - current.y) + 1;
+                    g.setColor(new Color(0, 160, 255, 78));
+                    g.fillRect(x, y, width, height);
+                    g.setStroke(new BasicStroke(4f));
+                    g.setColor(Color.WHITE);
+                    g.drawRect(x, y, width, height);
+                    g.setStroke(new BasicStroke(2f));
+                    g.setColor(new Color(0, 105, 220));
+                    g.drawRect(x + 1, y + 1, Math.max(0, width - 2), Math.max(0, height - 2));
+                    g.setFont(new Font("Segoe UI", Font.BOLD, 13));
+                    String dimensions = width + " × " + height + " px";
+                    FontMetrics metrics = g.getFontMetrics();
+                    int labelX = Math.max(5, Math.min(getWidth() - metrics.stringWidth(dimensions) - 12, x));
+                    int labelY = y > 28 ? y - 7 : Math.min(getHeight() - 8, y + height + 20);
+                    g.setColor(new Color(0, 35, 75, 220));
+                    g.fillRoundRect(labelX - 5, labelY - metrics.getAscent(), metrics.stringWidth(dimensions) + 10,
+                            metrics.getHeight() + 5, 7, 7);
+                    g.setColor(Color.WHITE);
+                    g.drawString(dimensions, labelX, labelY);
+                }
+
                 g.setColor(new Color(20, 29, 43, 225));
                 g.fillRoundRect(14, 14, Math.min(getWidth() - 28, 760), 48, 10, 10);
                 g.setColor(Color.WHITE);
@@ -2821,7 +2855,7 @@ private void showScreenSelectionOverlay(String instruction, boolean dragToSelect
                 g.drawString(instruction, 27, 40);
                 g.setFont(new Font("Segoe UI", Font.PLAIN, 11));
                 g.drawString(dragToSelect
-                        ? "Drag with the left mouse button. Press Escape to cancel."
+                        ? "Drag with the left mouse button. The blue box shows your selection. Press Escape to cancel."
                         : "Click once anywhere. Press Escape to cancel.", 27, 57);
             } finally {
                 g.dispose();
@@ -2831,13 +2865,11 @@ private void showScreenSelectionOverlay(String instruction, boolean dragToSelect
     canvas.setFocusable(true);
     overlay.setContentPane(canvas);
 
-    ScreenSelectionRequest request = new ScreenSelectionRequest(
-            overlay, desktopBounds, dragToSelect, onSelection);
     activeScreenSelection = request;
     overlay.setVisible(true);
     canvas.requestFocusInWindow();
     statusLabel.setText(dragToSelect
-            ? "Screen picker active. Drag over the target area; Escape cancels."
+            ? "Screen picker active. Drag over the target area; the blue selection box follows your mouse. Escape cancels."
             : "Screen picker active. Click the target pixel; Escape cancels.");
 }
 
@@ -2849,15 +2881,36 @@ private void handleScreenSelectionMousePressed(ScreenSelectionRequest request, i
         finishScreenSelection(request, new Rectangle(point.x, point.y, 0, 0), false);
     } else {
         request.dragStart = point;
+        request.dragCurrent = point;
+        request.overlay.getContentPane().repaint();
     }
+}
+
+private void handleScreenSelectionMouseDragged(ScreenSelectionRequest request, int screenX, int screenY) {
+    if (activeScreenSelection != request || request.finished.get() || !request.dragToSelect) return;
+    Point start = request.dragStart;
+    if (start == null) return;
+    int maxX = request.desktopBounds.x + request.desktopBounds.width - 1;
+    int maxY = request.desktopBounds.y + request.desktopBounds.height - 1;
+    Point current = new Point(
+            Math.max(request.desktopBounds.x, Math.min(maxX, screenX)),
+            Math.max(request.desktopBounds.y, Math.min(maxY, screenY)));
+    request.dragCurrent = current;
+    request.overlay.getContentPane().repaint();
 }
 
 private void handleScreenSelectionMouseReleased(ScreenSelectionRequest request, int screenX, int screenY) {
     if (activeScreenSelection != request || request.finished.get() || !request.dragToSelect) return;
     Point start = request.dragStart;
     if (start == null) return;
-    Point end = new Point(screenX, screenY);
+    int maxX = request.desktopBounds.x + request.desktopBounds.width - 1;
+    int maxY = request.desktopBounds.y + request.desktopBounds.height - 1;
+    Point end = new Point(
+            Math.max(request.desktopBounds.x, Math.min(maxX, screenX)),
+            Math.max(request.desktopBounds.y, Math.min(maxY, screenY)));
+    request.dragCurrent = end;
     request.dragStart = null;
+    request.overlay.getContentPane().repaint();
     int left = Math.min(start.x, end.x);
     int top = Math.min(start.y, end.y);
     int width = Math.abs(start.x - end.x) + 1;
@@ -2871,14 +2924,6 @@ private void handleScreenSelectionMouseReleased(ScreenSelectionRequest request, 
         return;
     }
     Rectangle selected = new Rectangle(left, top, width, height);
-    if (!request.desktopBounds.contains(selected)) {
-        SwingUtilities.invokeLater(() -> {
-            if (activeScreenSelection == request && !closing) {
-                statusLabel.setText("Keep the selection inside the visible desktop area.");
-            }
-        });
-        return;
-    }
     finishScreenSelection(request, selected, false);
 }
 
@@ -2903,17 +2948,11 @@ private void editFindImageBlock(MacroBlock block) {
     JLabel referenceStatus = new JLabel(block.text.isBlank()
             ? "No visual reference captured yet."
             : "Saved reference: " + Path.of(block.text).getFileName());
-    JButton captureButton = new JButton("Capture a small image from screen…");
-    captureButton.setToolTipText("Drag a tight rectangle around a UI icon, button, or other desktop item.");
+    JButton captureButton = new JButton("Capture image from screen…");
+    captureButton.setToolTipText("Drag around an image or UI region of any size on your desktop. There is no 256 × 256 pixel cap.");
     captureButton.addActionListener(event -> showScreenSelectionOverlay(
             "Drag around the UI image to look for · Esc cancels", true, selected -> {
                 try {
-                    if (selected.width > 256 || selected.height > 256) {
-                        JOptionPane.showMessageDialog(this,
-                                "Choose a smaller area (maximum 256 × 256 pixels).",
-                                "Reference image too large", JOptionPane.WARNING_MESSAGE);
-                        return;
-                    }
                     BufferedImage captured = robot.createScreenCapture(selected);
                     Path directory = Path.of(System.getProperty("user.home"), ".kss", "targets");
                     Files.createDirectories(directory);
@@ -2927,14 +2966,15 @@ private void editFindImageBlock(MacroBlock block) {
                         throw new IOException("The saved reference path is too long for the macro settings file.");
                     }
                     pathField.setText(savedPath);
-                    referenceStatus.setText("Saved reference: " + target.getFileName());
+                    referenceStatus.setText("Saved reference: " + target.getFileName() + " ("
+                            + captured.getWidth() + " × " + captured.getHeight() + " px)");
                     statusLabel.setText("Captured visual reference " + target.getFileName() + ".");
                 } catch (Exception exception) {
                     statusLabel.setText("Could not save visual reference: " + exception.getMessage());
                 }
             }));
     JPanel panel = new JPanel(new BorderLayout(0, 8));
-    panel.add(new JLabel("<html><b>Look for image</b><br>Drag a small rectangle around a desktop UI icon or button. When this same image is visible on the desktop, blocks between this block and End if will run.</html>"), BorderLayout.NORTH);
+    panel.add(new JLabel("<html><b>Look for image</b><br>Drag a rectangle of any size around the desktop image or UI region to detect. There is no fixed 256 × 256 pixel limit. When it appears on screen, blocks between this block and End if will run.</html>"), BorderLayout.NORTH);
     JPanel center = new JPanel(new BorderLayout(0, 5));
     center.add(captureButton, BorderLayout.NORTH);
     center.add(pathField, BorderLayout.CENTER);
@@ -3440,6 +3480,19 @@ if (JOptionPane.showConfirmDialog(this, content, "Edit If pixel found",
         }
         HoldBind holdBind = holdTriggerMap.get(triggerCode);
         if (holdBind != null) stopHoldBind(holdBind, true);
+    }
+
+    @Override
+    public void nativeMouseMoved(NativeMouseEvent event) {
+        // Pointer motion without a pressed button is not used by the screen picker.
+    }
+
+    @Override
+    public void nativeMouseDragged(NativeMouseEvent event) {
+        ScreenSelectionRequest selection = activeScreenSelection;
+        if (selection != null) {
+            handleScreenSelectionMouseDragged(selection, event.getX(), event.getY());
+        }
     }
 
     @Override
@@ -4971,6 +5024,7 @@ private static boolean similarColor(int left, int right, int tolerance) {
         private final java.util.function.Consumer<Rectangle> onSelection;
         private final AtomicBoolean finished = new AtomicBoolean(false);
         private volatile Point dragStart;
+        private volatile Point dragCurrent;
 
         private ScreenSelectionRequest(JWindow overlay, Rectangle desktopBounds, boolean dragToSelect,
                 java.util.function.Consumer<Rectangle> onSelection) {
