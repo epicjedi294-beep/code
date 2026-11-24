@@ -64,7 +64,7 @@ jobs:
           if "PointAccess" in picker or "private Point anchor" in picker:
               raise SystemExit("Stale picker placeholder/state remains.")
           for feature in [
-              'MacroBlockType.FIND_IMAGE("If image found")',
+              'FIND_IMAGE("If image found")',
               "private boolean findImageVisible",
               "ImageIO.read",
               "case FIND_IMAGE ->",
