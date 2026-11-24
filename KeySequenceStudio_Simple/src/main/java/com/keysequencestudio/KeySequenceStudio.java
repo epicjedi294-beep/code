@@ -2525,7 +2525,7 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         if (type == null) return;
 
         boolean addClosingRepeat = type == MacroBlockType.REPEAT;
-        boolean addClosingIf = type == MacroBlockType.FIND_IMAGE;
+        boolean addClosingIf = type == MacroBlockType.FIND_PIXEL || type == MacroBlockType.FIND_IMAGE;
         int requiredSlots = (addClosingRepeat || addClosingIf) ? 2 : 1;
         if (macro.blocks.size() + requiredSlots > MAX_STEPS_PER_BIND) {
             statusLabel.setText("This macro has reached the block limit.");
@@ -2581,7 +2581,8 @@ public final class KeySequenceStudio extends JFrame implements NativeKeyListener
         } else if (addClosingRepeat) {
             statusLabel.setText("Added Repeat with its matching End repeat. Select Repeat and add blocks to place them inside.");
         } else if (addClosingIf) {
-            statusLabel.setText("Added Look for image with End if. Capture a small UI image, then add actions inside the block.");
+            String conditionalName = type == MacroBlockType.FIND_PIXEL ? "If pixel found" : "Look for image";
+            statusLabel.setText("Added " + conditionalName + " with End if. Configure it, then add actions inside the block.");
             editSelectedMacroBlock();
         } else {
             statusLabel.setText("Added " + block.description() + " block.");
@@ -2979,6 +2980,7 @@ rSpinner.addChangeListener(e -> updatePreview.run());
 gSpinner.addChangeListener(e -> updatePreview.run());
 bSpinner.addChangeListener(e -> updatePreview.run());
 
+int[] sampledScreenPoint = {block.code, block.milliseconds};
 JButton sampleButton = new JButton("Pick pixel from anywhere on screen…");
 sampleButton.setToolTipText("Opens a full-desktop picker. Click the pixel you want to detect, even in another app or game.");
 sampleButton.addActionListener(event -> showScreenSelectionOverlay(
@@ -2988,6 +2990,8 @@ sampleButton.addActionListener(event -> showScreenSelectionOverlay(
                 rSpinner.setValue(sampled.getRed());
                 gSpinner.setValue(sampled.getGreen());
                 bSpinner.setValue(sampled.getBlue());
+                sampledScreenPoint[0] = picked.x;
+                sampledScreenPoint[1] = picked.y;
                 statusLabel.setText(String.format(Locale.ROOT,
                         "Sampled #%02X%02X%02X at %d,%d",
                         sampled.getRed(), sampled.getGreen(), sampled.getBlue(), picked.x, picked.y));
@@ -3056,6 +3060,8 @@ content.add(center, BorderLayout.CENTER);
 
 if (JOptionPane.showConfirmDialog(this, content, "Edit If pixel found",
         JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {
+    block.code = sampledScreenPoint[0];
+    block.milliseconds = sampledScreenPoint[1];
     block.searchX = ((Number) xSpinner.getValue()).intValue();
     block.searchY = ((Number) ySpinner.getValue()).intValue();
     block.searchW = Math.max(1, ((Number) wSpinner.getValue()).intValue());
@@ -3099,6 +3105,10 @@ if (JOptionPane.showConfirmDialog(this, content, "Edit If pixel found",
             partner = findMatchingEndRepeat(macro.blocks, index);
         } else if (selected.type == MacroBlockType.END_REPEAT) {
             partner = findMatchingStartRepeat(macro.blocks, index);
+        } else if (selected.type == MacroBlockType.FIND_PIXEL || selected.type == MacroBlockType.FIND_IMAGE) {
+            partner = findMatchingEndIf(macro.blocks, index);
+        } else if (selected.type == MacroBlockType.END_IF) {
+            partner = findMatchingStartIf(macro.blocks, index);
         }
 
         synchronized (macro.blocks) {
@@ -3117,7 +3127,7 @@ if (JOptionPane.showConfirmDialog(this, content, "Edit If pixel found",
         }
         persistBinds();
         statusLabel.setText(partner >= 0
-                ? "Removed the Repeat block and its matching End repeat."
+                ? "Removed the conditional/repeat block and its matching end marker."
                 : "Removed macro block.");
     }
 
@@ -3137,6 +3147,27 @@ if (JOptionPane.showConfirmDialog(this, content, "Edit If pixel found",
             MacroBlockType type = blocks.get(i).type;
             if (type == MacroBlockType.END_REPEAT) depth++;
             else if (type == MacroBlockType.REPEAT && --depth == 0) return i;
+        }
+        return -1;
+    }
+
+    private static int findMatchingEndIf(List<MacroBlock> blocks, int startIndex) {
+        int depth = 0;
+        for (int i = startIndex; i < blocks.size(); i++) {
+            MacroBlockType type = blocks.get(i).type;
+            if (type == MacroBlockType.FIND_PIXEL || type == MacroBlockType.FIND_IMAGE) depth++;
+            else if (type == MacroBlockType.END_IF && --depth == 0) return i;
+        }
+        return -1;
+    }
+
+    private static int findMatchingStartIf(List<MacroBlock> blocks, int endIndex) {
+        int depth = 0;
+        for (int i = endIndex; i >= 0; i--) {
+            MacroBlockType type = blocks.get(i).type;
+            if (type == MacroBlockType.END_IF) depth++;
+            else if ((type == MacroBlockType.FIND_PIXEL || type == MacroBlockType.FIND_IMAGE)
+                    && --depth == 0) return i;
         }
         return -1;
     }
@@ -3648,7 +3679,7 @@ if (JOptionPane.showConfirmDialog(this, content, "Edit If pixel found",
         });
     }
 
-    /** Scans the selected region or the entire virtual desktop and returns the first matching pixel. */
+    /** Scans the selected region or the entire virtual desktop and prefers the match closest to the sampled pixel. */
 private Point findPixelLocation(MacroBlock block) {
     Rectangle rect;
     if ("screen".equalsIgnoreCase(block.text)) {
@@ -3669,6 +3700,10 @@ private Point findPixelLocation(MacroBlock block) {
     int targetGreen = (target >> 8) & 0xFF;
     int targetBlue = target & 0xFF;
     int tolerance = Math.max(0, Math.min(255, block.colorTolerance));
+    boolean hasSampleAnchor = block.code != 0 || block.milliseconds != 0;
+    long bestDistance = Long.MAX_VALUE;
+    Point bestMatch = null;
+
     for (int y = 0; y < image.getHeight(); y++) {
         if (Thread.currentThread().isInterrupted()) return null;
         for (int x = 0; x < image.getWidth(); x++) {
@@ -3679,11 +3714,20 @@ private Point findPixelLocation(MacroBlock block) {
             if (Math.abs(red - targetRed) <= tolerance
                     && Math.abs(green - targetGreen) <= tolerance
                     && Math.abs(blue - targetBlue) <= tolerance) {
-                return new Point(rect.x + x, rect.y + y);
+                Point match = new Point(rect.x + x, rect.y + y);
+                if (!hasSampleAnchor) return match; // Compatibility for old blocks not sampled in the picker.
+                long dx = (long) match.x - block.code;
+                long dy = (long) match.y - block.milliseconds;
+                long distance = dx * dx + dy * dy;
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestMatch = match;
+                }
+                if (distance == 0) return match;
             }
         }
     }
-    return null;
+    return bestMatch;
 }
 
 
@@ -3708,24 +3752,28 @@ private Point findImageLocation(MacroBlock block) {
         int centerX = width / 2;
         int centerY = height / 2;
         int anchor = reference.getRGB(centerX, centerY);
-        final int tolerance = 42;
-        for (int y = 0; y <= screen.getHeight() - height; y += 2) {
+        final int tolerance = 55;
+        final int requiredMatches = 20; // 80% of the 5 × 5 sample grid.
+        // Check every coordinate. A two-pixel stride missed references whose top-left
+        // corner landed on an odd screen coordinate.
+        for (int y = 0; y <= screen.getHeight() - height; y++) {
             if (Thread.currentThread().isInterrupted()) return null;
-            for (int x = 0; x <= screen.getWidth() - width; x += 2) {
+            for (int x = 0; x <= screen.getWidth() - width; x++) {
                 if (!similarColor(screen.getRGB(x + centerX, y + centerY), anchor, tolerance)) continue;
-                boolean matches = true;
-                for (int gy = 0; gy <= 4 && matches; gy++) {
+                int matchedSamples = 0;
+                for (int gy = 0; gy <= 4; gy++) {
                     int sampleY = (height - 1) * gy / 4;
                     for (int gx = 0; gx <= 4; gx++) {
                         int sampleX = (width - 1) * gx / 4;
-                        if (!similarColor(screen.getRGB(x + sampleX, y + sampleY),
+                        if (similarColor(screen.getRGB(x + sampleX, y + sampleY),
                                 reference.getRGB(sampleX, sampleY), tolerance)) {
-                            matches = false;
-                            break;
+                            matchedSamples++;
                         }
                     }
                 }
-                if (matches) return new Point(bounds.x + x + centerX, bounds.y + y + centerY);
+                if (matchedSamples >= requiredMatches) {
+                    return new Point(bounds.x + x + centerX, bounds.y + y + centerY);
+                }
             }
         }
         return null;
