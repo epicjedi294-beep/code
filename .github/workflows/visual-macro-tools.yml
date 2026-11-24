@@ -1,0 +1,612 @@
+name: Add screen picker and visual search blocks
+
+on:
+  push:
+    paths:
+      - ".github/workflows/visual-macro-tools.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Add screen point picker and Look for image block
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          source_path = Path("KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java")
+          source = source_path.read_text(encoding="utf-8")
+
+          def replace_once(old, new, label):
+              global source
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              source = source.replace(old, new, 1)
+
+          replace_once(
+              "import java.awt.image.BufferedImage;\n",
+              "import java.awt.image.BufferedImage;\nimport javax.imageio.ImageIO;\n",
+              "Add ImageIO import"
+          )
+
+          replace_once(
+              '        addToolboxBlock(toolbox, "If pixel found", MacroBlockType.FIND_PIXEL, new Color(92, 177, 214));\n',
+              '        addToolboxBlock(toolbox, "If pixel found", MacroBlockType.FIND_PIXEL, new Color(92, 177, 214));\n'
+              '        addToolboxBlock(toolbox, "Look for image", MacroBlockType.FIND_IMAGE, new Color(92, 177, 214));\n',
+              "Add Look for image toolbox block"
+          )
+
+          replace_once(
+              "        boolean addClosingRepeat = type == MacroBlockType.REPEAT;\n"
+              "        int requiredSlots = addClosingRepeat ? 2 : 1;\n",
+              "        boolean addClosingRepeat = type == MacroBlockType.REPEAT;\n"
+              "        boolean addClosingIf = type == MacroBlockType.FIND_IMAGE;\n"
+              "        int requiredSlots = (addClosingRepeat || addClosingIf) ? 2 : 1;\n",
+              "Create paired Look for image container"
+          )
+
+          replace_once(
+              "            case FIND_PIXEL -> MacroBlock.findPixel(0, 0, 200, 200, 0xFF0000, 15);\n"
+              "            case END_IF -> MacroBlock.marker(MacroBlockType.END_IF);\n",
+              "            case FIND_PIXEL -> MacroBlock.findPixel(0, 0, 200, 200, 0xFF0000, 15);\n"
+              "            case FIND_IMAGE -> MacroBlock.findImage();\n"
+              "            case END_IF -> MacroBlock.marker(MacroBlockType.END_IF);\n",
+              "Create FIND_IMAGE block"
+          )
+
+          replace_once(
+              "            if (addClosingRepeat) {\n"
+              "                macro.blocks.add(index + 1, MacroBlock.marker(MacroBlockType.END_REPEAT));\n"
+              "            }\n",
+              "            if (addClosingRepeat) {\n"
+              "                macro.blocks.add(index + 1, MacroBlock.marker(MacroBlockType.END_REPEAT));\n"
+              "            } else if (addClosingIf) {\n"
+              "                macro.blocks.add(index + 1, MacroBlock.marker(MacroBlockType.END_IF));\n"
+              "            }\n",
+              "Insert matching End if automatically"
+          )
+
+          replace_once(
+              "        if (type == MacroBlockType.KEY || type == MacroBlockType.MOUSE) {\n"
+              "            beginMacroBlockInputCapture(block);\n"
+              "        } else if (addClosingRepeat) {\n"
+              "            statusLabel.setText(\"Added Repeat with its matching End repeat. Select Repeat and add blocks to place them inside.\");\n"
+              "        } else {\n",
+              "        if (type == MacroBlockType.KEY || type == MacroBlockType.MOUSE) {\n"
+              "            beginMacroBlockInputCapture(block);\n"
+              "        } else if (addClosingRepeat) {\n"
+              "            statusLabel.setText(\"Added Repeat with its matching End repeat. Select Repeat and add blocks to place them inside.\");\n"
+              "        } else if (addClosingIf) {\n"
+              "            statusLabel.setText(\"Added Look for image with End if. Capture a small UI image, then add actions inside the block.\");\n"
+              "            editSelectedMacroBlock();\n"
+              "        } else {\n",
+              "Open visual reference setup when adding block"
+          )
+
+          replace_once(
+              "            case MOVE_MOUSE, MOVE_MOUSE_REL -> {\n"
+              "                boolean relative = block.type == MacroBlockType.MOVE_MOUSE_REL;\n"
+              "                JSpinner xSpinner = new JSpinner(new SpinnerNumberModel(block.code, relative ? -10_000 : 0, 10_000, 1));\n"
+              "                JSpinner ySpinner = new JSpinner(new SpinnerNumberModel(block.milliseconds, relative ? -10_000 : 0, 10_000, 1));\n"
+              "                JPanel panel = new JPanel(new GridLayout(2, 2, 8, 6));\n"
+              "                panel.add(new JLabel(relative ? \"Change X by:\" : \"Screen X:\"));\n"
+              "                panel.add(xSpinner);\n"
+              "                panel.add(new JLabel(relative ? \"Change Y by:\" : \"Screen Y:\"));\n"
+              "                panel.add(ySpinner);\n"
+              "                String title = relative ? \"Edit move mouse by\" : \"Edit move mouse to\";\n"
+              "                if (JOptionPane.showConfirmDialog(this, panel, title, JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {\n"
+              "                    block.code = ((Number) xSpinner.getValue()).intValue();\n"
+              "                    block.milliseconds = ((Number) ySpinner.getValue()).intValue();\n"
+              "                    macroBlockList.repaint();\n"
+              "                    persistBinds();\n"
+              "                    statusLabel.setText(\"Updated \" + block.description() + \".\");\n"
+              "                }\n"
+              "            }\n",
+              "            case MOVE_MOUSE, MOVE_MOUSE_REL -> {\n"
+              "                boolean relative = block.type == MacroBlockType.MOVE_MOUSE_REL;\n"
+              "                JSpinner xSpinner = new JSpinner(new SpinnerNumberModel(block.code, relative ? -10_000 : -20_000, relative ? 10_000 : 20_000, 1));\n"
+              "                JSpinner ySpinner = new JSpinner(new SpinnerNumberModel(block.milliseconds, relative ? -10_000 : -20_000, relative ? 10_000 : 20_000, 1));\n"
+              "                JPanel coordinates = new JPanel(new GridLayout(2, 2, 8, 6));\n"
+              "                coordinates.add(new JLabel(relative ? \"Change X by:\" : \"Screen X:\"));\n"
+              "                coordinates.add(xSpinner);\n"
+              "                coordinates.add(new JLabel(relative ? \"Change Y by:\" : \"Screen Y:\"));\n"
+              "                coordinates.add(ySpinner);\n"
+              "                JPanel panel = new JPanel(new BorderLayout(0, 8));\n"
+              "                panel.add(coordinates, BorderLayout.CENTER);\n"
+              "                if (!relative) {\n"
+              "                    JButton pickPoint = new JButton(\"Pick coordinates from screen…\");\n"
+              "                    pickPoint.setToolTipText(\"Click the destination point on your desktop to fill X and Y.\");\n"
+              "                    pickPoint.addActionListener(event -> showScreenSelectionOverlay(\n"
+              "                            \"Click the point where the mouse should move · Esc cancels\", false, picked -> {\n"
+              "                                xSpinner.setValue(picked.x);\n"
+              "                                ySpinner.setValue(picked.y);\n"
+              "                                statusLabel.setText(\"Picked screen position \" + picked.x + \",\" + picked.y + \".\");\n"
+              "                            }));\n"
+              "                    panel.add(pickPoint, BorderLayout.SOUTH);\n"
+              "                }\n"
+              "                String title = relative ? \"Edit move mouse by\" : \"Edit move mouse to\";\n"
+              "                if (JOptionPane.showConfirmDialog(this, panel, title, JOptionPane.OK_CANCEL_OPTION) == JOptionPane.OK_OPTION) {\n"
+              "                    block.code = ((Number) xSpinner.getValue()).intValue();\n"
+              "                    block.milliseconds = ((Number) ySpinner.getValue()).intValue();\n"
+              "                    macroBlockList.repaint();\n"
+              "                    persistBinds();\n"
+              "                    statusLabel.setText(\"Updated \" + block.description() + \".\");\n"
+              "                }\n"
+              "            }\n",
+              "Add click-to-pick coordinates to Move Mouse To"
+          )
+
+          replace_once(
+              "            case FIND_PIXEL -> editFindPixelBlock(block);\n",
+              "            case FIND_PIXEL -> editFindPixelBlock(block);\n"
+              "            case FIND_IMAGE -> editFindImageBlock(block);\n",
+              "Edit visual search block"
+          )
+
+          screen_helpers = r'''
+          private Rectangle virtualScreenBounds() {
+              Rectangle bounds = null;
+              for (GraphicsDevice device : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
+                  Rectangle screen = device.getDefaultConfiguration().getBounds();
+                  bounds = bounds == null ? new Rectangle(screen) : bounds.union(screen);
+              }
+              return bounds == null ? new Rectangle(Toolkit.getDefaultToolkit().getScreenSize()) : bounds;
+          }
+
+          /**
+           * Shows a frozen screenshot overlay so the user can pick an absolute point or drag
+           * a small reference region. The overlay is disposed before the callback runs.
+           */
+          private void showScreenSelectionOverlay(String instruction, boolean dragToSelect,
+                  java.util.function.Consumer<Rectangle> onSelection) {
+              final Rectangle desktopBounds = virtualScreenBounds();
+              final BufferedImage desktopImage;
+              try {
+                  desktopImage = robot.createScreenCapture(desktopBounds);
+              } catch (Exception exception) {
+                  statusLabel.setText("Could not capture the desktop: " + exception.getMessage());
+                  return;
+              }
+
+              final JWindow overlay = new JWindow();
+              overlay.setBounds(desktopBounds);
+              overlay.setAlwaysOnTop(true);
+              overlay.setFocusableWindowState(true);
+              overlay.setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+
+              JComponent canvas = new JComponent() {
+                  private static final long serialVersionUID = 1L;
+                  private Point anchor;
+                  private Point current;
+
+                  @Override
+                  protected void paintComponent(Graphics graphics) {
+                      Graphics2D g = (Graphics2D) graphics.create();
+                      try {
+                          g.drawImage(desktopImage, 0, 0, null);
+                          g.setColor(new Color(12, 18, 28, 72));
+                          g.fillRect(0, 0, getWidth(), getHeight());
+                          g.setColor(new Color(20, 29, 43, 225));
+                          g.fillRoundRect(14, 14, Math.min(getWidth() - 28, 650), 42, 10, 10);
+                          g.setColor(Color.WHITE);
+                          g.setFont(new Font("Segoe UI", Font.BOLD, 14));
+                          g.drawString(instruction, 27, 40);
+                          if (anchor != null && current != null && dragToSelect) {
+                              int x = Math.min(anchor.x, current.x);
+                              int y = Math.min(anchor.y, current.y);
+                              int w = Math.abs(anchor.x - current.x);
+                              int h = Math.abs(anchor.y - current.y);
+                              g.setColor(new Color(55, 170, 255, 55));
+                              g.fillRect(x, y, w, h);
+                              g.setColor(new Color(25, 120, 220));
+                              g.setStroke(new BasicStroke(2f));
+                              g.drawRect(x, y, w, h);
+                          }
+                      } finally {
+                          g.dispose();
+                      }
+                  }
+              };
+              canvas.setFocusable(true);
+              canvas.addMouseListener(new java.awt.event.MouseAdapter() {
+                  @Override
+                  public void mousePressed(java.awt.event.MouseEvent event) {
+                      ((PointAccess) null);
+                  }
+              });
+              // Mouse handling is installed below using a small state holder so the picker
+              // can safely keep its selection local to this overlay.
+              final Point[] points = new Point[2];
+              canvas.addMouseListener(new java.awt.event.MouseAdapter() {
+                  @Override
+                  public void mousePressed(java.awt.event.MouseEvent event) {
+                      points[0] = event.getPoint();
+                      points[1] = event.getPoint();
+                      canvas.repaint();
+                  }
+
+                  @Override
+                  public void mouseReleased(java.awt.event.MouseEvent event) {
+                      if (points[0] == null) return;
+                      points[1] = event.getPoint();
+                      Rectangle local = new Rectangle(
+                              Math.min(points[0].x, points[1].x),
+                              Math.min(points[0].y, points[1].y),
+                              Math.max(1, Math.abs(points[0].x - points[1].x)),
+                              Math.max(1, Math.abs(points[0].y - points[1].y)));
+                      if (dragToSelect && (local.width < 5 || local.height < 5)) {
+                          points[0] = null;
+                          points[1] = null;
+                          canvas.repaint();
+                          statusLabel.setText("Drag a rectangle at least 5 × 5 pixels around the item.");
+                          return;
+                      }
+                      Rectangle selected = new Rectangle(
+                              desktopBounds.x + local.x,
+                              desktopBounds.y + local.y,
+                              dragToSelect ? local.width : 0,
+                              dragToSelect ? local.height : 0);
+                      overlay.dispose();
+                      SwingUtilities.invokeLater(() -> onSelection.accept(selected));
+                  }
+              });
+              canvas.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+                  @Override
+                  public void mouseDragged(java.awt.event.MouseEvent event) {
+                      points[1] = event.getPoint();
+                      canvas.repaint();
+                  }
+
+                  @Override
+                  public void mouseMoved(java.awt.event.MouseEvent event) {
+                      if (points[0] != null) {
+                          points[1] = event.getPoint();
+                          canvas.repaint();
+                      }
+                  }
+              });
+              canvas.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                      KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "cancelScreenPicker");
+              canvas.getActionMap().put("cancelScreenPicker", new AbstractAction() {
+                  private static final long serialVersionUID = 1L;
+                  @Override
+                  public void actionPerformed(java.awt.event.ActionEvent event) {
+                      overlay.dispose();
+                      statusLabel.setText("Screen picker cancelled.");
+                  }
+              });
+              overlay.setContentPane(canvas);
+              overlay.setVisible(true);
+              canvas.requestFocusInWindow();
+          }
+
+          private void editFindImageBlock(MacroBlock block) {
+              JTextField pathField = new JTextField(block.text, 30);
+              pathField.setEditable(false);
+              JLabel referenceStatus = new JLabel(block.text.isBlank()
+                      ? "No visual reference captured yet."
+                      : "Saved reference: " + Path.of(block.text).getFileName());
+              JButton captureButton = new JButton("Capture a small image from screen…");
+              captureButton.setToolTipText("Drag a tight rectangle around a UI icon, button, or other desktop item.");
+              captureButton.addActionListener(event -> showScreenSelectionOverlay(
+                      "Drag around the UI image to look for · Esc cancels", true, selected -> {
+                          try {
+                              if (selected.width > 256 || selected.height > 256) {
+                                  JOptionPane.showMessageDialog(this,
+                                          "Choose a smaller area (maximum 256 × 256 pixels).",
+                                          "Reference image too large", JOptionPane.WARNING_MESSAGE);
+                                  return;
+                              }
+                              BufferedImage captured = robot.createScreenCapture(selected);
+                              Path directory = Path.of(System.getProperty("user.home"), ".kss", "targets");
+                              Files.createDirectories(directory);
+                              Path target = directory.resolve("visual-" + System.nanoTime() + ".png");
+                              if (!ImageIO.write(captured, "png", target.toFile())) {
+                                  throw new IOException("PNG image writer is unavailable.");
+                              }
+                              String savedPath = target.toAbsolutePath().toString();
+                              if (savedPath.length() > 180) {
+                                  Files.deleteIfExists(target);
+                                  throw new IOException("The saved reference path is too long for the macro settings file.");
+                              }
+                              pathField.setText(savedPath);
+                              referenceStatus.setText("Saved reference: " + target.getFileName());
+                              statusLabel.setText("Captured visual reference " + target.getFileName() + ".");
+                          } catch (Exception exception) {
+                              statusLabel.setText("Could not save visual reference: " + exception.getMessage());
+                          }
+                      }));
+              JPanel panel = new JPanel(new BorderLayout(0, 8));
+              panel.add(new JLabel("<html><b>Look for image</b><br>Drag a small rectangle around a desktop UI icon or button. When this same image is visible on the desktop, blocks between this block and End if will run.</html>"), BorderLayout.NORTH);
+              JPanel center = new JPanel(new BorderLayout(0, 5));
+              center.add(captureButton, BorderLayout.NORTH);
+              center.add(pathField, BorderLayout.CENTER);
+              center.add(referenceStatus, BorderLayout.SOUTH);
+              panel.add(center, BorderLayout.CENTER);
+              if (JOptionPane.showConfirmDialog(this, panel, "Edit Look for image block",
+                      JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION) {
+                  String path = pathField.getText().trim();
+                  if (path.isBlank() || !Files.isRegularFile(Path.of(path))) {
+                      JOptionPane.showMessageDialog(this, "Capture a visual reference before saving this block.",
+                              "Visual reference required", JOptionPane.WARNING_MESSAGE);
+                      return;
+                  }
+                  block.text = path;
+                  macroBlockList.repaint();
+                  persistBinds();
+                  statusLabel.setText("Saved Look for image block. Add actions between it and End if.");
+              }
+          }
+          '''
+          # Remove a no-op listener placeholder before insertion. The real listener is below.
+          screen_helpers = screen_helpers.replace(
+              '              canvas.addMouseListener(new java.awt.event.MouseAdapter() {\n'
+              '                  @Override\n'
+              '                  public void mousePressed(java.awt.event.MouseEvent event) {\n'
+              '                      ((PointAccess) null);\n'
+              '                  }\n'
+              '              });\n',
+              ''
+          )
+
+          replace_once(
+              "    private void editFindPixelBlock(MacroBlock block) {\n",
+              screen_helpers + "\n    private void editFindPixelBlock(MacroBlock block) {\n",
+              "Add desktop point and region picker plus image reference editor"
+          )
+
+          image_search = r'''
+          /** Returns true when the saved visual reference is found on any attached desktop display. */
+          private boolean findImageVisible(MacroBlock block) {
+              if (block.text == null || block.text.isBlank()) {
+                  throw new IllegalStateException("Capture a visual reference in the Look for image block first.");
+              }
+              try {
+                  Path referencePath = Path.of(block.text);
+                  if (!Files.isRegularFile(referencePath)) {
+                      throw new IOException("Visual reference file is missing: " + referencePath.getFileName());
+                  }
+                  BufferedImage reference = ImageIO.read(referencePath.toFile());
+                  if (reference == null) throw new IOException("The visual reference is not a readable image.");
+                  Rectangle bounds = virtualScreenBounds();
+                  BufferedImage screen = robot.createScreenCapture(bounds);
+                  int rw = reference.getWidth();
+                  int rh = reference.getHeight();
+                  if (rw < 5 || rh < 5 || rw > screen.getWidth() || rh > screen.getHeight()) return false;
+
+                  int centerX = rw / 2;
+                  int centerY = rh / 2;
+                  int anchor = reference.getRGB(centerX, centerY);
+                  final int tolerance = 42;
+                  for (int y = 0; y <= screen.getHeight() - rh; y += 2) {
+                      if (Thread.currentThread().isInterrupted()) return false;
+                      for (int x = 0; x <= screen.getWidth() - rw; x += 2) {
+                          if (!similarColor(screen.getRGB(x + centerX, y + centerY), anchor, tolerance)) continue;
+                          boolean matches = true;
+                          for (int gy = 0; gy <= 4 && matches; gy++) {
+                              int sampleY = (rh - 1) * gy / 4;
+                              for (int gx = 0; gx <= 4; gx++) {
+                                  int sampleX = (rw - 1) * gx / 4;
+                                  if (!similarColor(screen.getRGB(x + sampleX, y + sampleY),
+                                          reference.getRGB(sampleX, sampleY), tolerance)) {
+                                      matches = false;
+                                      break;
+                                  }
+                              }
+                          }
+                          if (matches) return true;
+                      }
+                  }
+                  return false;
+              } catch (IOException exception) {
+                  throw new IllegalStateException("Could not scan for the saved visual reference: " + exception.getMessage(), exception);
+              }
+          }
+
+          private static boolean similarColor(int left, int right, int tolerance) {
+              return Math.abs(((left >> 16) & 0xFF) - ((right >> 16) & 0xFF)) <= tolerance
+                      && Math.abs(((left >> 8) & 0xFF) - ((right >> 8) & 0xFF)) <= tolerance
+                      && Math.abs((left & 0xFF) - (right & 0xFF)) <= tolerance;
+          }
+
+          '''
+          replace_once(
+              "    /** Advances pc past the matching END_IF for the IF_PIXEL at fromIndex (handles nesting). */\n",
+              image_search + "    /** Advances pc past the matching END_IF for the IF_PIXEL / FIND_IMAGE at fromIndex (handles nesting). */\n",
+              "Add visual image scanner"
+          )
+
+          replace_once(
+              "            if (t == MacroBlockType.FIND_PIXEL) depth++;\n",
+              "            if (t == MacroBlockType.FIND_PIXEL || t == MacroBlockType.FIND_IMAGE) depth++;\n",
+              "Support nested image conditionals"
+          )
+
+          replace_once(
+              "                        case END_IF -> {\n"
+              "                            logMacro(\"End if\");\n"
+              "                            pc++;\n"
+              "                        }\n",
+              "                        case FIND_IMAGE -> {\n"
+              "                            boolean found = findImageVisible(block);\n"
+              "                            if (found) {\n"
+              "                                logMacro(\"Look for image: visual reference found → run enclosed blocks\");\n"
+              "                                pc++;\n"
+              "                            } else {\n"
+              "                                logMacro(\"Look for image: reference not found → skip enclosed blocks\");\n"
+              "                                pc = skipToMatchingEndIf(blocks, pc);\n"
+              "                            }\n"
+              "                        }\n"
+              "                        case END_IF -> {\n"
+              "                            logMacro(\"End if\");\n"
+              "                            pc++;\n"
+              "                        }\n",
+              "Execute Look for image conditional block"
+          )
+
+          replace_once(
+              "            } else if (type == MacroBlockType.FIND_PIXEL) {\n",
+              "            } else if (type == MacroBlockType.FIND_PIXEL || type == MacroBlockType.FIND_IMAGE) {\n",
+              "Validate image conditional nesting"
+          )
+          replace_once(
+              '                if (ifDepth > MAX_MACRO_LOOP_DEPTH) return "If pixel blocks can be nested up to " + MAX_MACRO_LOOP_DEPTH + " levels.";\n',
+              '                if (ifDepth > MAX_MACRO_LOOP_DEPTH) return "If / Look for image blocks can be nested up to " + MAX_MACRO_LOOP_DEPTH + " levels.";\n',
+              "Update image conditional validation message"
+          )
+
+          replace_once(
+              "            case END_REPEAT, END_IF, STOP, BEEP, COPY_TEXT, COMMENT, NOTIFY -> { /* no additional numeric values */ }\n",
+              "            case END_REPEAT, END_IF, FIND_IMAGE, STOP, BEEP, COPY_TEXT, COMMENT, NOTIFY -> { /* no additional numeric values */ }\n",
+              "Validate image block save data"
+          )
+          replace_once(
+              "                if (code < 0 || code > 10_000 || milliseconds < 0 || milliseconds > 10_000)\n",
+              "                if (code < -20_000 || code > 20_000 || milliseconds < -20_000 || milliseconds > 20_000)\n",
+              "Allow coordinates on secondary monitors"
+          )
+
+          replace_once(
+              '        FIND_PIXEL("If pixel found"), END_IF("End if");\n',
+              '        FIND_PIXEL("If pixel found"), END_IF("End if"), FIND_IMAGE("If image found");\n',
+              "Append FIND_IMAGE enum without changing older ordinals"
+          )
+          replace_once(
+              "        private static MacroBlock findPixel(int x, int y, int w, int h, int rgb, int tolerance) {\n"
+              "            MacroBlock block = new MacroBlock(MacroBlockType.FIND_PIXEL, 0, 0, \"\");\n"
+              "            block.searchX = x;\n"
+              "            block.searchY = y;\n"
+              "            block.searchW = Math.max(1, w);\n"
+              "            block.searchH = Math.max(1, h);\n"
+              "            block.colorRgb = rgb & 0xFFFFFF;\n"
+              "            block.colorTolerance = Math.max(0, Math.min(255, tolerance));\n"
+              "            return block;\n"
+              "        }\n",
+              "        private static MacroBlock findPixel(int x, int y, int w, int h, int rgb, int tolerance) {\n"
+              "            MacroBlock block = new MacroBlock(MacroBlockType.FIND_PIXEL, 0, 0, \"\");\n"
+              "            block.searchX = x;\n"
+              "            block.searchY = y;\n"
+              "            block.searchW = Math.max(1, w);\n"
+              "            block.searchH = Math.max(1, h);\n"
+              "            block.colorRgb = rgb & 0xFFFFFF;\n"
+              "            block.colorTolerance = Math.max(0, Math.min(255, tolerance));\n"
+              "            return block;\n"
+              "        }\n"
+              "        private static MacroBlock findImage() { return new MacroBlock(MacroBlockType.FIND_IMAGE, 0, 0, \"\"); }\n",
+              "Add image block factory"
+          )
+          replace_once(
+              "                case FIND_PIXEL -> String.format(Locale.ROOT,\n"
+              "                        \"If #%06X found in %d,%d %dx%d (±%d)\",\n"
+              "                        colorRgb & 0xFFFFFF, searchX, searchY, searchW, searchH, colorTolerance);\n"
+              "                case END_IF -> \"End if (close If pixel found)\";\n",
+              "                case FIND_PIXEL -> String.format(Locale.ROOT,\n"
+              "                        \"If #%06X found in %d,%d %dx%d (±%d)\",\n"
+              "                        colorRgb & 0xFFFFFF, searchX, searchY, searchW, searchH, colorTolerance);\n"
+              "                case FIND_IMAGE -> \"Look for image: \" + (text.isBlank() ? \"reference not set\" : text);\n"
+              "                case END_IF -> \"End if (close If / Look for image)\";\n",
+              "Add image block description"
+          )
+
+          replace_once(
+              "                case COPY_TEXT, FIND_PIXEL, END_IF -> new Color(92, 177, 214);\n",
+              "                case COPY_TEXT, FIND_PIXEL, FIND_IMAGE, END_IF -> new Color(92, 177, 214);\n",
+              "Render image block with sensing color"
+          )
+          replace_once(
+              "                if (prior == MacroBlockType.REPEAT || prior == MacroBlockType.FIND_PIXEL) depth++;\n",
+              "                if (prior == MacroBlockType.REPEAT || prior == MacroBlockType.FIND_PIXEL || prior == MacroBlockType.FIND_IMAGE) depth++;\n",
+              "Indent nested image blocks"
+          )
+          replace_once(
+              "                case END_IF -> {\n"
+              "                    titleText = \"END IF\";\n"
+              "                    detailText = \"closes the If pixel found block\";\n"
+              "                }\n",
+              "                case FIND_IMAGE -> {\n"
+              "                    titleText = \"LOOK FOR IMAGE\";\n"
+              "                    detailText = block.text.isBlank() ? \"capture a small desktop UI reference\" : \"saved reference: \" + Path.of(block.text).getFileName();\n"
+              "                }\n"
+              "                case END_IF -> {\n"
+              "                    titleText = \"END IF\";\n"
+              "                    detailText = \"closes the If pixel found / Look for image block\";\n"
+              "                }\n",
+              "Render Look for image block"
+          )
+
+          source_path.write_text(source, encoding="utf-8")
+
+          build_path = Path("KeySequenceStudio_Simple/build.gradle")
+          build = build_path.read_text(encoding="utf-8")
+          if "version = '1.4.6'" not in build:
+              raise SystemExit("Expected current v1.4.6 source tree.")
+          build_path.write_text(build.replace("version = '1.4.6'", "version = '1.4.7'", 1), encoding="utf-8")
+          print("Updated to v1.4.7: screen coordinate picker, captured visual reference block, image matching, nested End if support.")
+          PY
+
+      - name: Compile against the real JNativeHook dependency
+        run: |
+          curl --fail --silent --show-error --location \
+            https://repo.maven.apache.org/maven2/com/github/kwhat/jnativehook/2.2.2/jnativehook-2.2.2.jar \
+            --output "$RUNNER_TEMP/jnativehook-2.2.2.jar"
+          mkdir -p "$RUNNER_TEMP/kss-classes"
+          javac --release 17 -encoding UTF-8 \
+            -classpath "$RUNNER_TEMP/jnativehook-2.2.2.jar" \
+            -d "$RUNNER_TEMP/kss-classes" \
+            KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java
+
+      - name: Verify new features and save compatibility
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path("KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java")
+          s = p.read_text(encoding="utf-8")
+          required = [
+              'Pick coordinates from screen',
+              'showScreenSelectionOverlay',
+              'Look for image',
+              'private boolean findImageVisible',
+              'ImageIO.read',
+              'case FIND_IMAGE ->',
+              'MacroBlock.findImage()',
+              'addClosingIf',
+              'FIND_PIXEL || MacroBlockType.FIND_IMAGE',
+              'FIND_PIXEL || type == MacroBlockType.FIND_IMAGE',
+              'case FIND_IMAGE -> "Look for image:',
+          ]
+          missing = [item for item in required if item not in s]
+          if missing:
+              raise SystemExit("Missing feature checks: " + ", ".join(missing))
+          if "FILE_VERSION = 15" not in s:
+              raise SystemExit("Saved-data schema should remain compatible with v1.4.6.")
+          print("Screen picker, image block, nested conditional, and save compatibility checks passed.")
+          PY
+
+      - name: Package v1.4.7
+        run: |
+          zip -qr KeySequenceStudio_1.4.7_ScreenPicker_LookForImage.zip KeySequenceStudio_Simple
+          unzip -t KeySequenceStudio_1.4.7_ScreenPicker_LookForImage.zip
+
+      - name: Commit updated source and ZIP
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add KeySequenceStudio_Simple
+          git add KeySequenceStudio_1.4.7_ScreenPicker_LookForImage.zip
+          git commit -m "Add screen coordinate picker and visual search macro block"
+          git push
