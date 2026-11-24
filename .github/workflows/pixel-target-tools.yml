@@ -257,7 +257,7 @@ jobs:
                       block.text = "screen";
                       return block;
                   }
-  """,
+          """,
               "Default new pixel blocks to whole-screen scanning"
           )
 
