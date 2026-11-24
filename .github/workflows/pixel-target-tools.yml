@@ -106,7 +106,7 @@ jobs:
                       }
                   }
               }
-  """,
+          """,
               "Add automatic detected-target movement option"
           )
 
