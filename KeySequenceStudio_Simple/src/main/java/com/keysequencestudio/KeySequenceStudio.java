@@ -4876,7 +4876,7 @@ private static boolean similarColor(int left, int right, int tolerance) {
                 case COPY_TEXT -> "Copy text: " + (text.isBlank() ? "(empty)" : text);
                 case COMMENT -> "Comment: " + (text.isBlank() ? "(empty)" : text);
                 case RANDOM_NUMBER -> "Random number " + milliseconds + "–" + code;
-                case MOVE_MOUSE -> "Move mouse to x:" + numericSlotText(this, code) + " y:" + numericSlotText(this, milliseconds);
+                case MOVE_MOUSE -> ("fixed".equalsIgnoreCase(text) ? "Move mouse to fixed X/Y " : "Move mouse to detected point inside Find blocks; fallback X/Y ") + numericSlotText(this, code) + "," + numericSlotText(this, milliseconds);
                 case MOVE_MOUSE_REL -> "Move mouse by dx:" + numericSlotText(this, code) + " dy:" + numericSlotText(this, milliseconds);
                 case FIND_PIXEL -> String.format(Locale.ROOT,
                 "If #%06X found %s (±%d)",
@@ -5183,7 +5183,10 @@ private static boolean similarColor(int left, int right, int tolerance) {
                 }
                 case MOVE_MOUSE -> {
                     titleText = "MOVE MOUSE TO";
-                    detailText = "x: [ " + numericSlotText(block, block.code) + " ]  y: [ " + numericSlotText(block, block.milliseconds) + " ]";
+                    String coordinates = "x: [ " + numericSlotText(block, block.code) + " ]  y: [ " + numericSlotText(block, block.milliseconds) + " ]";
+                    detailText = "fixed".equalsIgnoreCase(block.text)
+                            ? "fixed X/Y (ignore detected point) · " + coordinates
+                            : "auto target inside Find blocks · " + coordinates;
                 }
                 case MOVE_MOUSE_REL -> {
                     titleText = "MOVE MOUSE BY";
@@ -5191,8 +5194,10 @@ private static boolean similarColor(int left, int right, int tolerance) {
                 }
                 case FIND_PIXEL -> {
                     titleText = "IF PIXEL FOUND";
-                    detailText = String.format(Locale.ROOT, "#%06X  region %d,%d  %dx%d  tol %d",
-                            block.colorRgb & 0xFFFFFF, block.searchX, block.searchY, block.searchW, block.searchH, block.colorTolerance);
+                    String area = "screen".equalsIgnoreCase(block.text)
+                            ? "entire desktop" : "region " + block.searchX + "," + block.searchY + "  " + block.searchW + "x" + block.searchH;
+                    detailText = String.format(Locale.ROOT, "#%06X  %s  tol %d",
+                            block.colorRgb & 0xFFFFFF, area, block.colorTolerance);
                 }
                 case FIND_IMAGE -> {
                     titleText = "LOOK FOR IMAGE";
