@@ -440,17 +440,15 @@ jobs:
           )
 
           # Update summaries so the workspace says when a Find Pixel block scans the whole screen.
-          replace_once(
-              """                case FIND_PIXEL -> String.format(Locale.ROOT,
-                          "If #%06X found in %d,%d %dx%d (±%d)",
-                          colorRgb & 0xFFFFFF, searchX, searchY, searchW, searchH);
-          """,
+          replace_section(
+              "                case FIND_PIXEL -> String.format(Locale.ROOT,\n",
+              "                case FIND_IMAGE -> ",
               """                case FIND_PIXEL -> String.format(Locale.ROOT,
                           "If #%06X found %s (±%d)",
                           colorRgb & 0xFFFFFF,
                           "screen".equalsIgnoreCase(text) ? "anywhere on screen" : "in " + searchX + "," + searchY + " " + searchW + "x" + searchH,
                           colorTolerance);
-          """,
+  """,
               "Update Find Pixel block description"
           )
 
