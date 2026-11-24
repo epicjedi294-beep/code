@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - ".github/workflows/package-v148.yml"
+      - "KeySequenceStudio_Simple/src/main/java/com/keysequencestudio/KeySequenceStudio.java"
+      - "KeySequenceStudio_Simple/build.gradle"
   workflow_dispatch:
 
 permissions:
