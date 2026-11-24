@@ -243,20 +243,24 @@ jobs:
 
           # New Find Pixel blocks search the entire virtual desktop. Existing blocks retain
           # their saved region setting unless the user changes it in the editor.
-          replace_once(
-              """            block.colorTolerance = Math.max(0, Math.min(255, tolerance));
-              return block;
-          }
-          """,
-              """            block.colorTolerance = Math.max(0, Math.min(255, tolerance));
-              block.text = "screen";
-              return block;
-          }
-          """,
+          replace_section(
+              "        private static MacroBlock findPixel(int x, int y, int w, int h, int rgb, int tolerance) {\n",
+              "        private static MacroBlock findImage()",
+              """        private static MacroBlock findPixel(int x, int y, int w, int h, int rgb, int tolerance) {
+                      MacroBlock block = new MacroBlock(MacroBlockType.FIND_PIXEL, 0, 0, "");
+                      block.searchX = x;
+                      block.searchY = y;
+                      block.searchW = Math.max(1, w);
+                      block.searchH = Math.max(1, h);
+                      block.colorRgb = rgb & 0xFFFFFF;
+                      block.colorTolerance = Math.max(0, Math.min(255, tolerance));
+                      block.text = "screen";
+                      return block;
+                  }
+  """,
               "Default new pixel blocks to whole-screen scanning"
           )
 
-          # Scan the entire virtual screen when requested; otherwise use the picked rectangle.
           replace_section(
               "    /** Scans the region; returns the absolute screen Point of the first match, or null if none. */\n",
               "\n\n/** Returns true when the saved visual reference",
