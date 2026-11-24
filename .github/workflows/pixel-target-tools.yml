@@ -85,7 +85,7 @@ jobs:
                       statusLabel.setText("Updated " + block.description() + ".");
                   }
               }
-  """,
+          """,
               """            case MOVE_MOUSE, MOVE_MOUSE_REL -> {
                   boolean relative = block.type == MacroBlockType.MOVE_MOUSE_REL;
                   JSpinner xSpinner = new JSpinner(new SpinnerNumberModel(block.code, relative ? -10_000 : -20_000, relative ? 10_000 : 20_000, 1));
@@ -136,7 +136,7 @@ jobs:
                       }
                   }
               }
-  """,
+          """,
               "Add automatic detected-target movement option"
           )
 
@@ -263,7 +263,7 @@ jobs:
           }
       }
 
-  '''
+          '''
           replace_section(
               "    private void editFindPixelBlock(MacroBlock block) {\n",
               "    private void moveSelectedMacroBlock(int direction) {\n",
@@ -277,12 +277,12 @@ jobs:
               """            block.colorTolerance = Math.max(0, Math.min(255, tolerance));
               return block;
           }
-  """,
+          """,
               """            block.colorTolerance = Math.max(0, Math.min(255, tolerance));
               block.text = "screen";
               return block;
           }
-  """,
+          """,
               "Default new pixel blocks to whole-screen scanning"
           )
 
@@ -406,7 +406,7 @@ jobs:
                               robot.mouseMove(x, y);
                               pc++;
                           }
-  """,
+          """,
               """                        case MOVE_MOUSE -> {
                               Point detectedPoint = (!"fixed".equalsIgnoreCase(block.text) && !findTargetStack.isEmpty())
                                       ? findTargetStack.peek() : null;
@@ -422,7 +422,7 @@ jobs:
                               }
                               pc++;
                           }
-  """,
+          """,
               "Use found point for Move Mouse To inside detection block"
           )
 
@@ -455,7 +455,7 @@ jobs:
                               logMacro("End if");
                               pc++;
                           }
-  """,
+          """,
               """                        case FIND_PIXEL -> {
                               Point found = findPixelLocation(block);
                               if (found != null) {
@@ -487,7 +487,7 @@ jobs:
                               logMacro("End if");
                               pc++;
                           }
-  """,
+          """,
               "Carry detected pixel/image position into conditional body"
           )
 
@@ -496,13 +496,13 @@ jobs:
               """                case FIND_PIXEL -> String.format(Locale.ROOT,
                           "If #%06X found in %d,%d %dx%d (±%d)",
                           colorRgb & 0xFFFFFF, searchX, searchY, searchW, searchH);
-  """,
+          """,
               """                case FIND_PIXEL -> String.format(Locale.ROOT,
                           "If #%06X found %s (±%d)",
                           colorRgb & 0xFFFFFF,
                           "screen".equalsIgnoreCase(text) ? "anywhere on screen" : "in " + searchX + "," + searchY + " " + searchW + "x" + searchH,
                           colorTolerance);
-  """,
+          """,
               "Update Find Pixel block description"
           )
 
